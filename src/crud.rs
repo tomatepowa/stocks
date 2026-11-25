@@ -203,8 +203,8 @@ pub async fn lister(
     Ok(r)
 }
 
-/// `POST /api/etablissement/{id}/referencer` `{nature?, famille_id?, stock_mini?, stock_maxi?}` :
-/// crée les articles-sites manquants pour les articles actifs des référentiels de l'établissement.
+/// `POST /api/etablissement/{id}/referencer` `{nature?, famille_id?}` : crée les articles-sites
+/// manquants pour les articles actifs des référentiels de l'établissement (la dotation se règle par magasin).
 pub async fn referencer(
     State(etat): State<Arc<Etat>>,
     Path(id): Path<i64>,
@@ -217,22 +217,22 @@ pub async fn referencer(
             _ => None,
         }
     };
-    let (nature, famille, mini, maxi) = (texte("nature"), texte("famille_id"), texte("stock_mini"), texte("stock_maxi"));
+    let (nature, famille) = (texte("nature"), texte("famille_id"));
     let mut c = etat.pool.get().await?;
     let tx = c.transaction().await?;
     tx.execute("select set_config('stocks.utilisateur', $1, true)", &[&"poste local"]).await?;
     let n = tx
         .execute(
-            "insert into article_site (article_id, etablissement_id, stock_mini, stock_maxi)
-             select a.id, $1, $2::text::numeric, $3::text::numeric
+            "insert into article_site (article_id, etablissement_id)
+             select a.id, $1
              from article a
              join etablissement_referentiel er
                on er.referentiel_id = a.referentiel_id and er.nature = a.nature and er.etablissement_id = $1
              where a.actif
-               and ($4::text is null or a.nature = $4)
-               and ($5::text is null or a.famille_id = $5::text::bigint)
+               and ($2::text is null or a.nature = $2)
+               and ($3::text is null or a.famille_id = $3::text::bigint)
                and not exists (select 1 from article_site s where s.article_id = a.id and s.etablissement_id = $1)",
-            &[&id, &mini, &maxi, &nature, &famille],
+            &[&id, &nature, &famille],
         )
         .await?;
     tx.commit().await?;

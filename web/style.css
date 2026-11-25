@@ -350,6 +350,16 @@ button.prendre:hover { background: #d4e3f0; }
 }
 .fenetre { background: var(--fond); border-radius: 10px; box-shadow: var(--ombre); width: min(1100px, 100%); padding: 16px 20px 18px; }
 .fenetre.petite { width: min(520px, 100%); }
+.fenetre.moyenne { width: min(780px, 100%); }
+.fenetre-tete .compte { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saisie-rapide .grille { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+.saisie-rapide .champ { margin: 6px 0 8px; }
+.fenetre .aide-mouvement { margin-bottom: 8px; }
+.mouvement-rapide summary { width: auto; padding: 0 12px; font-size: 14px; }
+.resume-stock { margin-top: 6px; font-size: 13px; color: var(--fg-doux); display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.resume-stock strong { color: var(--ok); }
+.resume-stock .prochain { color: #8a5300; }
+@media (max-width: 900px) { .saisie-rapide .grille { grid-template-columns: 1fr; } }
 .fenetre-tete { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .fenetre-tete h2 { margin: 0; font-size: 17px; }
 .fenetre h3 { font-size: 14px; margin: 18px 0 8px; }

@@ -123,12 +123,12 @@ function activerCombo(div, contexte = () => ({}), surChoix = null) {
 /** Filtres de contexte d'un champ de lien dans un formulaire : les champs de la fiche cible qui
  *  existent aussi dans le formulaire (même nom) la restreignent ; ex. le service d'une UF est pris
  *  dans l'établissement de l'UF, la famille d'un article dans son référentiel et sa nature. */
-function contexteFormulaire(form, c) {
+function contexteFormulaire(form, c, source = etat.courant) {
   const cible = etat.entites[c.extra];
   const p = {};
   // Lien vers le même fichier (ex. : magasin d'approvisionnement, souvent sur un autre site) :
   // pas de filtre de contexte, la base vérifie la règle.
-  if (c.extra === etat.courant.nom) return cible.champs.some((x) => x.col === "actif") ? { actif: "true" } : {};
+  if (c.extra === source.nom) return cible.champs.some((x) => x.col === "actif") ? { actif: "true" } : {};
   for (const tc of cible.champs) {
     if (tc.col === "actif" || !["ref", "choix"].includes(tc.genre)) continue;
     const el = form.elements[tc.col];
@@ -539,10 +539,13 @@ async function pageFiche(id, valeursInitiales = {}) {
   }
 
   const [code, titre] = nouveau ? ["", `Nouvel élément : ${e.libelle.toLowerCase()}`] : decouper(ligne._etiquette);
-  const extra = nouveau ? "" : {
+  const mouvement = !nouveau && MOUVEMENT_RAPIDE.includes(e.nom) ? `<details class="plus-actions mouvement-rapide">
+      <summary title="Saisir un mouvement pour cette fiche">Mouvement ▾</summary><div class="menu-actions">
+      ${TYPES_RAPIDES.map(([k, l]) => `<button type="button" data-mouvement="${k}">${esc(l)}</button>`).join("")}</div></details>` : "";
+  const extra = mouvement + (nouveau ? "" : {
     article: `<button type="button" id="sources" title="Comparer et reprendre les données des centrales">Centrales</button>`,
     etablissement: `<button type="button" id="referencer" title="Créer les articles-sites manquants">Référencer des articles</button>`,
-  }[e.nom] || "";
+  }[e.nom] || "");
   $("#page").innerHTML = `
     <div class="tete">
       <div class="fil" id="fil"><a href="#${e.nom}">${esc(e.pluriel)}</a></div>
@@ -564,6 +567,7 @@ async function pageFiche(id, valeursInitiales = {}) {
         </div>
       </div>
       <div class="puces" id="puces"></div>
+      <div class="resume-stock" id="resume-stock" hidden></div>
       ${nouveau ? "" : `<nav class="onglets" id="onglets"><button type="button" data-onglet="fiche" class="actif">Fiche</button></nav>`}
       <div id="message"></div>
     </div>
@@ -608,6 +612,12 @@ async function pageFiche(id, valeursInitiales = {}) {
     majPosition();
   }
   if (!nouveau && e.nom === "etablissement") $("#referencer").addEventListener("click", ouvrirReferencement);
+  if (!nouveau && MOUVEMENT_RAPIDE.includes(e.nom)) {
+    for (const b of $$("[data-mouvement]")) {
+      b.addEventListener("click", () => { b.closest("details").open = false; ouvrirMouvementRapide(b.dataset.mouvement); });
+    }
+    dessinerResumeStock();
+  }
   appliquerConditions();
   dessinerBadges();
   await dessinerRattachement();
@@ -1160,8 +1170,8 @@ async function afficherPrixConnus() {
 // ------------------------------------------------------------------ Mouvement : stock disponible et emplacement proposé
 
 /** Donne une valeur à un champ de lien (texte affiché et valeur cachée). */
-function remplirCombo(col, id, libelle) {
-  const div = $(`#formulaire .combo[data-col="${col}"]`);
+function remplirCombo(col, id, libelle, form = $("#formulaire")) {
+  const div = $(`.combo[data-col="${col}"]`, form);
   if (!div) return;
   $("input[type=hidden]", div).value = id ?? "";
   $(".combo-texte", div).value = libelle ?? "";
@@ -1171,12 +1181,11 @@ function remplirCombo(col, id, libelle) {
 /** Nouveau mouvement. Avec un départ : stock disponible de l'article dans ce magasin, du premier au
  *  dernier périmé, avec « Prendre ce lot » (emplacement, lot, série, péremption). Avec une arrivée :
  *  emplacement principal de l'article dans ce magasin, proposé s'il n'est pas déjà choisi. */
-async function aideMouvement() {
-  const form = $("#formulaire");
-  let zone = $("#aide-mouvement");
-  if (!zone) {
-    form.insertAdjacentHTML("beforebegin", `<div id="aide-mouvement" class="prix-connus" hidden></div>`);
-    zone = $("#aide-mouvement");
+async function aideMouvement(form = $("#formulaire")) {
+  let zone = form.previousElementSibling;
+  if (!zone || !zone.classList.contains("aide-mouvement")) {
+    form.insertAdjacentHTML("beforebegin", `<div class="prix-connus aide-mouvement" hidden></div>`);
+    zone = form.previousElementSibling;
   }
   const article = form.elements.article_id.value;
   const visible = (col) => { const d = $(`.champ[data-col="${col}"]`, form); return d && !d.hidden; };
@@ -1187,7 +1196,17 @@ async function aideMouvement() {
   if (article && destination && !form.elements.emplacement_destination_id.value) {
     const am = (await api(`/api/e/article_magasin?article_id=${article}&magasin_id=${destination}&limit=1`))[0];
     if (am && am.emplacement_principal_id) {
-      remplirCombo("emplacement_destination_id", am.emplacement_principal_id, await etiquette("emplacement", am.emplacement_principal_id));
+      remplirCombo("emplacement_destination_id", am.emplacement_principal_id, await etiquette("emplacement", am.emplacement_principal_id), form);
+    }
+  }
+  // Réception : fournisseur principal et son dernier prix (de l'établissement, sinon du groupe).
+  if (article && destination && form.elements.type.value === "reception" && form.elements.fournisseur_id && !form.elements.fournisseur_id.value) {
+    const magasin = await api(`/api/e/magasin/${destination}`);
+    const prix = await api(`/api/e/article_fournisseur?article_id=${article}&rang=1&actif=true&limit=20`);
+    const p = prix.find((x) => x.etablissement_id === magasin.etablissement_id) || prix.find((x) => !x.etablissement_id);
+    if (p) {
+      remplirCombo("fournisseur_id", p.fournisseur_id, p._l_fournisseur_id, form);
+      if (!form.elements.prix_unitaire.value && p.prix_unitaire_ht !== null) form.elements.prix_unitaire.value = p.prix_unitaire_ht;
     }
   }
   if (!article || !source) { zone.hidden = true; return; }
@@ -1206,16 +1225,136 @@ async function aideMouvement() {
   for (const b of $$("[data-prendre]", zone)) {
     b.addEventListener("click", async () => {
       const l = lignes[Number(b.dataset.prendre)];
-      remplirCombo("emplacement_source_id", l.emplacement_id, l._l_emplacement_id || "");
+      remplirCombo("emplacement_source_id", l.emplacement_id, l._l_emplacement_id || "", form);
       form.elements.lot.value = l.lot || "";
       form.elements.numero_serie.value = l.numero_serie || "";
       form.elements.peremption.value = l.peremption || "";
       if (!form.elements.quantite.value) form.elements.quantite.value = l.quantite;
       form.elements.quantite.max = l.quantite;
       form.dispatchEvent(new Event("input"));
-      $("#f-quantite").focus();
+      form.elements.quantite.focus();
     });
   }
+}
+
+// ------------------------------------------------------------------ Saisie rapide d'un mouvement depuis une fiche
+
+const MOUVEMENT_RAPIDE = ["article", "article_site", "article_magasin", "magasin"];
+const TYPES_RAPIDES = [["reception", "Réception fournisseur"], ["sortie", "Sortie vers une UF"], ["transfert", "Transfert"],
+  ["inventaire_plus", "Inventaire : écart en plus"], ["inventaire_moins", "Inventaire : écart en moins"], ["destruction", "Destruction"]];
+
+/** Ce que la fiche ouverte apporte au mouvement : article, magasin, établissement. */
+function contexteMouvement() {
+  const e = etat.courant, f = etat.fiche;
+  if (e.nom === "article") return { article: f.id };
+  if (e.nom === "article_site") return { article: f.article_id, etab: f.etablissement_id };
+  if (e.nom === "article_magasin") return { article: f.article_id, magasin: f.magasin_id, etab: f.etablissement_id };
+  if (e.nom === "magasin") return { magasin: f.id, etab: f.etablissement_id };
+  return {};
+}
+
+/** Fenêtre de saisie d'un mouvement, pré-remplie selon la fiche ; seuls les champs du type choisi.
+ *  « Enregistrer et continuer » garde la fenêtre ouverte pour la ligne suivante (autre lot…). */
+async function ouvrirMouvementRapide(type) {
+  const m = etat.entites.mouvement, ctx = contexteMouvement();
+  const entree = ["reception", "inventaire_plus", "retour_service"].includes(type);
+  const valeurs = { article_id: ctx.article, [entree ? "magasin_destination_id" : "magasin_source_id"]: ctx.magasin };
+  const libelle = m.champs.find((c) => c.col === "type").extra.find(([k]) => k === type)[1];
+  const visibles = m.champs.filter((c) => !c.calcule && c.col !== "type" && (!c.quand || c.quand.valeurs.includes(type)));
+  let champs = "";
+  for (const c of visibles) champs += await champHtml(c, valeurs[c.col], true);
+  const voile = document.createElement("div");
+  voile.className = "voile";
+  voile.innerHTML = `<div class="fenetre moyenne" role="dialog" aria-modal="true">
+      <div class="fenetre-tete"><h2>${esc(libelle)}</h2><span class="compte">depuis ${esc(etat.fiche._etiquette)}</span>
+        <span class="espace"></span><button type="button" class="discret icone fermer" title="Fermer">✕</button></div>
+      <form class="saisie-rapide" novalidate>
+        <input type="hidden" name="type" value="${type}">
+        ${ctx.etab ? `<input type="hidden" name="etablissement_id" value="${ctx.etab}">` : ""}
+        <div class="grille">${champs}</div>
+        <div class="actions"><button type="submit" class="principal" data-suite="0">Enregistrer</button>
+          <button type="submit" data-suite="1">Enregistrer et continuer</button>
+          <button type="button" class="fermer">Fermer</button><span class="message-mouvement"></span></div>
+      </form></div>`;
+  document.body.appendChild(voile);
+  const form = $("form", voile);
+  const fermer = () => voile.remove();
+  for (const b of $$(".fermer", voile)) b.addEventListener("click", fermer);
+  for (const div of $$(".combo", form)) {
+    const c = m.champs.find((x) => x.col === div.dataset.col);
+    activerCombo(div, () => contexteFormulaire(form, c, m));
+  }
+  form.addEventListener("change", (ev) => {
+    if (["article_id", "magasin_source_id", "magasin_destination_id"].includes(ev.target.name)) aideMouvement(form);
+  });
+  aideMouvement(form);
+  const premier = visibles.find((c) => !valeurs[c.col]);
+  if (premier && form.elements[premier.col]) {
+    const el = form.elements[premier.col].type === "hidden" ? $(`.combo[data-col="${premier.col}"] .combo-texte`, form) : form.elements[premier.col];
+    el.focus();
+  }
+
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const suite = ev.submitter && ev.submitter.dataset.suite === "1";
+    const corps = { type };
+    for (const c of visibles) {
+      const el = form.elements[c.col];
+      if (!el || el.value === "") continue;
+      corps[c.col] = c.genre === "ref" || c.genre === "entier" ? Number(el.value) : el.value;
+    }
+    const zone = $(".message-mouvement", voile);
+    try {
+      const r = await api("/api/e/mouvement", { method: "POST", body: JSON.stringify(corps) });
+      const quoi = `${nf.format(Number(r.quantite))}${r.lot ? ` · lot ${r.lot}` : ""}, valeur ${nf.format(Number(r.valeur_unitaire))} €`;
+      etat.nav.cle = null;
+      if (suite) {
+        for (const k of ["quantite", "lot", "numero_serie", "peremption"]) if (form.elements[k]) form.elements[k].value = "";
+        zone.innerHTML = `<span class="message ok">Enregistré : ${esc(quoi)}.</span>`;
+        aideMouvement(form);
+      } else {
+        fermer();
+        message(`Mouvement enregistré : ${libelle.charAt(0).toLowerCase() + libelle.slice(1)}, ${quoi}.`, "ok");
+      }
+      dessinerResumeStock();
+      if (etat.fiche) chargerOnglets(etat.fiche);
+    } catch (err) {
+      zone.innerHTML = `<span class="message erreur">${esc(err.message)}</span>`;
+    }
+  });
+}
+
+/** En-tête d'un article, d'un article-site ou d'un article-magasin : quantité en stock, répartition
+ *  et prochain lot à périmer. */
+async function dessinerResumeStock() {
+  const zone = $("#resume-stock"), e = etat.courant, f = etat.fiche;
+  if (!zone || !f) return;
+  const ctx = contexteMouvement();
+  if (!ctx.article) { zone.hidden = true; return; }
+  const p = new URLSearchParams({ article_id: ctx.article, limit: "1000" });
+  if (e.nom === "article_magasin") p.set("magasin_id", ctx.magasin);
+  else if (ctx.etab) p.set("etablissement_id", ctx.etab);
+  let lignes;
+  try { lignes = await api(`/api/e/stock?${p}`); } catch { return; }
+  if (etat.fiche !== f) return;
+  const total = lignes.reduce((n, l) => n + Number(l.quantite), 0);
+  const unite = (await api(`/api/e/article/${ctx.article}`)).unite_stock || "";
+  let detail = "";
+  if (e.nom === "article") {
+    const parEtab = new Map();
+    for (const l of lignes) parEtab.set(l._l_etablissement_id, (parEtab.get(l._l_etablissement_id) || 0) + Number(l.quantite));
+    detail = [...parEtab].map(([k, q]) => `${esc(decouper(k)[1] || k)} ${nf.format(q)}`).join(" · ");
+  } else {
+    const parMagasin = new Map();
+    for (const l of lignes) parMagasin.set(l._l_magasin_id, (parMagasin.get(l._l_magasin_id) || 0) + Number(l.quantite));
+    if (e.nom !== "article_magasin") detail = [...parMagasin].map(([k, q]) => `${esc(decouper(k)[0] || k)} ${nf.format(q)}`).join(" · ");
+  }
+  const prochain = lignes.filter((l) => l.peremption).sort((a, b) => a.peremption.localeCompare(b.peremption))[0];
+  zone.hidden = false;
+  zone.innerHTML = total
+    ? `<strong>En stock : ${nf.format(total)} ${esc(unite)}</strong>${detail ? ` <span>(${detail})</span>` : ""}
+       ${prochain ? `<span class="prochain">Prochain à périmer : lot ${esc(prochain.lot || "?")} au ${afficher({ genre: "date" }, prochain.peremption)}, ${nf.format(Number(prochain.quantite))}</span>` : ""}`
+    : `<strong>Aucun stock</strong>`;
 }
 
 // ------------------------------------------------------------------ Impacts d'une modification en cours
@@ -1350,8 +1489,6 @@ function ouvrirReferencement() {
         <div class="champ"><label>Famille (facultatif)</label>
           <div class="combo" data-cible="famille" data-col="famille_id"><input type="text" class="combo-texte" placeholder="Toutes" autocomplete="off">
           <input type="hidden" name="famille_id" value=""><div class="combo-liste" hidden></div></div></div>
-        <div class="champ"><label>Stock mini par défaut</label><input type="number" step="any" name="stock_mini"></div>
-        <div class="champ"><label>Stock maxi par défaut</label><input type="number" step="any" name="stock_maxi"></div>
         <div class="actions"><button type="submit" class="principal">Référencer</button><button type="button" class="fermer">Fermer</button>
           <span id="message-referencer"></span></div>
       </form></div>`;
@@ -1363,7 +1500,7 @@ function ouvrirReferencement() {
   activerCombo($(".combo", voile), () => (form.elements.nature.value ? { nature: form.elements.nature.value } : {}));
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
-    const corps = Object.fromEntries(["nature", "famille_id", "stock_mini", "stock_maxi"].map((k) => [k, form.elements[k].value]));
+    const corps = Object.fromEntries(["nature", "famille_id"].map((k) => [k, form.elements[k].value]));
     try {
       const r = await api(`/api/etablissement/${etab.id}/referencer`, { method: "POST", body: JSON.stringify(corps) });
       $("#message-referencer", voile).innerHTML = `<span class="message ok">${nf.format(r.crees)} article${r.crees > 1 ? "s" : ""} référencé${r.crees > 1 ? "s" : ""}.</span>`;

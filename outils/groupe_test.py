@@ -559,7 +559,7 @@ def charger(config):
         for nature, (mini, maxi) in {"medicament": (10, 40), "dm": (20, 100), "dmi": (1, 3), "economat": (5, 30)}.items():
             if nature in e["refs"]:
                 n = appeler(f"/etablissement/{etab['id']}/referencer",
-                            {"nature": nature, "stock_mini": mini, "stock_maxi": maxi})["crees"]
+                            {"nature": nature})["crees"]
                 compte["article_site"] = compte.get("article_site", 0) + n
 
     # Médicaments à risque propres à certains services (en plus de la liste de la PUI).

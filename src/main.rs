@@ -62,6 +62,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("008_principal_codes_figes", include_str!("../migrations/008_principal_codes_figes.sql")),
     ("009_compteurs_sans_referentiel", include_str!("../migrations/009_compteurs_sans_referentiel.sql")),
     ("010_stock_mouvements", include_str!("../migrations/010_stock_mouvements.sql")),
+    ("011_article_site_sans_seuils", include_str!("../migrations/011_article_site_sans_seuils.sql")),
 ];
 
 async fn migrer(pool: &Pool) -> Result<()> {
