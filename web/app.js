@@ -129,10 +129,17 @@ function contexteFormulaire(form, c, source = etat.courant) {
   // Lien vers le même fichier (ex. : magasin d'approvisionnement, souvent sur un autre site) :
   // pas de filtre de contexte, la base vérifie la règle.
   if (c.extra === source.nom) return cible.champs.some((x) => x.col === "actif") ? { actif: "true" } : {};
+  // Un champ du formulaire ne restreint la recherche que s'il désigne la même chose des deux côtés :
+  // même nom ET même lien (même fichier) ou même liste de valeurs. Ex. : le « type » d'un mouvement
+  // (réception…) n'a rien à voir avec le « type » d'un magasin (PUI…) ou d'un fournisseur.
+  const memesValeurs = (a, b) => JSON.stringify((a || []).map(([k]) => k)) === JSON.stringify((b || []).map(([k]) => k));
   for (const tc of cible.champs) {
     if (tc.col === "actif" || !["ref", "choix"].includes(tc.genre)) continue;
     const el = form.elements[tc.col];
     if (!el || el.value === "" || tc.col === c.col) continue;
+    const sc = source.champs.find((x) => x.col === tc.col);
+    if (!sc || sc.genre !== tc.genre) continue;
+    if (tc.genre === "ref" ? sc.extra !== tc.extra : !memesValeurs(sc.extra, tc.extra)) continue;
     p[(tc.requis ? "" : "~") + tc.col] = el.value;
   }
   // Même suffixe : l'emplacement « de départ » est pris dans le magasin « de départ ».
