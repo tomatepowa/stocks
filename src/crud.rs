@@ -61,6 +61,8 @@ impl From<tokio_postgres::Error> for Erreur {
                 "dmi_tracabilite" => "Un DMI doit avoir le lot ou le n° de série obligatoire, à la réception et à la sortie".to_string(),
                 "liste_medicament" => "Seul un médicament peut relever des listes I et II ou des stupéfiants".to_string(),
                 "mds_tracabilite" => "Un médicament dérivé du sang doit avoir le lot obligatoire à la réception et à la sortie".to_string(),
+                "magasin_role" => "Ce rôle ne correspond pas au type du magasin".to_string(),
+                "magasin_source_soi" => "Un magasin ne s'approvisionne pas lui-même".to_string(),
                 "magasin_pui_economat" => "Un magasin d'économat ne dépend pas d'une PUI".to_string(),
                 "magasin_pui_obligatoire" => "Un magasin de PUI doit être rattaché à une PUI".to_string(),
                 "classe_dm_nature" => "La classe de DM ne s'applique qu'aux dispositifs médicaux".to_string(),
@@ -237,6 +239,10 @@ fn nettoyer(e: &Entite, corps: Value) -> Result<Map<String, Value>, Erreur> {
     };
     let mut out = Map::new();
     for (k, v) in obj {
+        // Le code vient toujours du compteur et ne se modifie pas : jamais lu dans le corps.
+        if k == "code" {
+            continue;
+        }
         if e.champ(&k).is_some() {
             let v = match v {
                 Value::String(s) if s.trim().is_empty() => Value::Null,

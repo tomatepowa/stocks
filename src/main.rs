@@ -18,7 +18,9 @@ use axum::Router;
 use clap::Parser;
 use deadpool_postgres::{Manager, Pool};
 use tokio_postgres::NoTls;
+use axum::http::{header, HeaderValue};
 use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeader;
 
 #[derive(Parser)]
 #[command(about = "Serveur de gestion des stocks pharmacie et économat")]
@@ -56,6 +58,9 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("004_referentiels_externes", include_str!("../migrations/004_referentiels_externes.sql")),
     ("005_referentiels_par_nature", include_str!("../migrations/005_referentiels_par_nature.sql")),
     ("006_compteurs_familles", include_str!("../migrations/006_compteurs_familles.sql")),
+    ("007_pui_magasins_referentiels", include_str!("../migrations/007_pui_magasins_referentiels.sql")),
+    ("008_principal_codes_figes", include_str!("../migrations/008_principal_codes_figes.sql")),
+    ("009_compteurs_sans_referentiel", include_str!("../migrations/009_compteurs_sans_referentiel.sql")),
 ];
 
 async fn migrer(pool: &Pool) -> Result<()> {
@@ -113,7 +118,13 @@ async fn main() -> Result<()> {
             post(referentiels::importer).layer(DefaultBodyLimit::max(200 * 1024 * 1024)),
         )
         .with_state(etat)
-        .fallback_service(ServeDir::new(&cli.web));
+        // Pages : le navigateur revérifie chaque fichier (sans le retélécharger s'il n'a pas changé),
+        // pour qu'une mise à jour soit vue tout de suite.
+        .fallback_service(SetResponseHeader::overriding(
+            ServeDir::new(&cli.web),
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-cache"),
+        ));
 
     let adresse = format!("{}:{}", cli.hote, cli.port);
     let ecoute = tokio::net::TcpListener::bind(&adresse).await.with_context(|| format!("écoute sur {adresse}"))?;

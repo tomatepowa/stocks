@@ -88,7 +88,7 @@ pub struct Entite {
 
 use Genre::*;
 
-const CODE_AUTO: &str = "Laisser vide : code attribué par le compteur (Paramètres › Compteurs de codes).";
+const CODE_AUTO: &str = "Attribué par le compteur à la création (Paramètres › Compteurs de codes) ; ne se modifie jamais.";
 const NATURES: &[(&str, &str)] =
     &[("medicament", "Médicament"), ("dm", "Dispositif médical"), ("dmi", "DMI"), ("economat", "Économat")];
 const TRAC: &[(&str, &str)] =
@@ -110,6 +110,8 @@ pub static ENTITES: &[Entite] = &[
         champs: &[
             c("code", "Code", Texte).l().aide(CODE_AUTO),
             c("libelle", "Libellé", Texte).req().l(),
+            c("abrege", "Abrégé", Texte).l().aide("Libellé court affiché à côté des articles et des familles (ex. : DMI-PIN)."),
+            c("pui_gestionnaire_id", "PUI gestionnaire", Ref("pui")).l().aide("PUI qui valide les mises à jour (listes officielles, centrales). Vide pour l'économat."),
             c("actif", "Actif", Booleen).l(),
         ],
     },
@@ -124,6 +126,8 @@ pub static ENTITES: &[Entite] = &[
             c("code", "Code", Texte).l().aide(CODE_AUTO),
             c("libelle", "Libellé", Texte).req().l(),
             c("pharmacien_gerant", "Pharmacien gérant", Texte).l(),
+            c("etablissement_siege_id", "Établissement siège", Ref("etablissement")).l().aide("Établissement titulaire de l'autorisation, où la PUI est implantée ; il doit être desservi par la PUI."),
+            c("cadre", "Cadre", Choix(&[("propre", "PUI de l'établissement"), ("multi_sites", "Multi-sites (même entité juridique)"), ("convention", "Desserte d'autres entités par convention"), ("gcs", "PUI de GCS")])).req().l().badge("*"),
             c("actif", "Actif", Booleen).l(),
         ],
     },
@@ -242,6 +246,8 @@ pub static ENTITES: &[Entite] = &[
             c("code", "Code", Texte).l().aide(CODE_AUTO),
             c("libelle", "Libellé", Texte).req().l(),
             c("type", "Type", Choix(&[("pui", "PUI"), ("economat", "Économat"), ("service", "Armoire de service")])).req().l().badge("*"),
+            c("role", "Rôle", Choix(&[("reserve", "Réserve"), ("depot", "Dépôt de site"), ("coffre_stupefiants", "Coffre des stupéfiants"), ("froid", "Chambre froide"), ("dmi", "Réserve des DMI"), ("armoire", "Armoire de service"), ("arsenal", "Arsenal"), ("depot_antenne", "Dépôt d'antenne (HAD)")])).req().l().badge("*").aide("PUI : réserve, dépôt, coffre, froid, DMI ; service : armoire, arsenal, dépôt d'antenne ; économat : réserve, dépôt."),
+            c("magasin_source_id", "Approvisionné par", Ref("magasin")).l().aide("Magasin qui le réapprovisionne : de la même PUI (même d'un autre site), ou l'économat de l'établissement."),
             c("uf_id", "UF desservie", Ref("uf")).l().quand("type", &["service"]),
             c("pui_id", "PUI responsable", Ref("pui")).l().quand("type", &["pui", "service"]).aide("Vide : PUI de l'établissement."),
             c("actif", "Actif", Booleen),
@@ -267,7 +273,7 @@ pub static ENTITES: &[Entite] = &[
         libelle: "Famille",
         pluriel: "Familles",
         groupe: "Articles",
-        etiquette: "t.code || ' – ' || t.libelle || coalesce(' · ' || (select r.code from referentiel r where r.id = t.referentiel_id), ' · commune')",
+        etiquette: "t.code || ' – ' || t.libelle || coalesce(' · ' || (select coalesce(r.abrege, r.code) from referentiel r where r.id = t.referentiel_id), ' · commune')",
         champs: &[
             c("referentiel_id", "Référentiel", Ref("referentiel")).l().p(1).aide("Vide : famille commune à tous les référentiels du groupe."),
             c("code", "Code", Texte).l().aide(CODE_AUTO),
@@ -283,7 +289,7 @@ pub static ENTITES: &[Entite] = &[
         libelle: "Article",
         pluriel: "Articles",
         groupe: "Articles",
-        etiquette: "t.code || ' – ' || t.designation || ' · ' || (select r.code from referentiel r where r.id = t.referentiel_id)",
+        etiquette: "t.code || ' – ' || t.designation || ' · ' || (select coalesce(r.abrege, r.code) from referentiel r where r.id = t.referentiel_id)",
         champs: &[
             c("referentiel_id", "Référentiel", Ref("referentiel")).req().l().s("Identification").p(2),
             c("code", "Code", Texte).l().aide(CODE_AUTO).s("Identification"),
@@ -453,7 +459,6 @@ pub static ENTITES: &[Entite] = &[
         groupe: "Paramètres",
         etiquette: "t.entite || coalesce(nullif(' / ' || t.variante, ' / '), '') \
                     || coalesce(' / ' || (select e.code from etablissement e where e.id = t.etablissement_id), '') \
-                    || coalesce(' / ' || (select r.code from referentiel r where r.id = t.referentiel_id), '') \
                     || ' : ' || t.prefixe || lpad(t.prochain::text, t.longueur, '0')",
         champs: &[
             c("entite", "Fichier", Choix(&[("article", "Articles"), ("fournisseur", "Fournisseurs"), ("famille", "Familles"), ("etablissement", "Établissements"), ("entite_juridique", "Entités juridiques"), ("pui", "PUI"), ("referentiel", "Référentiels"), ("pole", "Pôles"), ("service", "Services"), ("uf", "UF"), ("magasin", "Magasins"), ("emplacement", "Emplacements"), ("source_externe", "Sources externes")])).req().l(),
@@ -462,7 +467,6 @@ pub static ENTITES: &[Entite] = &[
             c("longueur", "Nombre de chiffres", Entier).req().l(),
             c("prochain", "Prochain numéro", Entier).req().l(),
             c("etablissement_id", "Pour l'établissement", Ref("etablissement")).l().aide("Facultatif : compteur propre à un établissement (UF, services, magasins…)."),
-            c("referentiel_id", "Pour le référentiel", Ref("referentiel")).l().aide("Facultatif : compteur propre à un référentiel (ex. : DMI d'un site)."),
             c("actif", "Actif", Booleen).l(),
         ],
     },

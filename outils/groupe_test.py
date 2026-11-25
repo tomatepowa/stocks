@@ -1,19 +1,18 @@
 """Charge par l'API un groupe de cliniques de test complet (noms fictifs, aucun code officiel).
 
-Groupe : 4 établissements, chacun avec sa PUI.
-  - 2 MCO de 200 lits, avec pôles ;
-  - 1 SMR de 60 lits ;
-  - 1 HAD de 200 places.
-Référentiels :
-  - médicaments communs aux 4 ;
-  - DM communs aux 2 MCO ; DM de soins courants communs au SMR et à la HAD ;
-  - DMI propres à chaque établissement ;
-  - économat commun aux 4.
+Scénarios (--scenario=N) :
+  1. Quatre établissements, chacun avec sa PUI : 2 MCO de 200 lits, 1 SMR de 60 lits, 1 HAD de 200 places.
+     Médicaments et économat communs aux quatre ; DM communs aux MCO ; DM de soins courants communs
+     au SMR et à la HAD ; DMI propres à chaque établissement.
+  2. Une PUI centrale pour trois MCO de 200 lits, chaque MCO ayant ses propres magasins et emplacements ;
+     tous les articles des MCO sont communs. À côté, trois petits SMR (40 lits) et une HAD, chacun avec
+     sa PUI : ils ne partagent que les médicaments ; ni DMI au SMR ni à la HAD ; DM et économat propres
+     à chacun.
 
 Familles communes au groupe. Compteurs propres à chaque site (UF, services, magasins…) et à chaque
 référentiel de DMI. Articles-sites créés par référencement en masse.
 
-Usage : python -I outils/groupe_test.py [http://127.0.0.1:8090]
+Usage : python -I outils/groupe_test.py [--scenario=2] [http://127.0.0.1:8090]
 """
 import json
 import random
@@ -22,7 +21,9 @@ import time
 import urllib.error
 import urllib.request
 
-BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8090").rstrip("/") + "/api"
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+SCENARIO = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--scenario=")), "1")
+BASE = (ARGS[0] if ARGS else "http://127.0.0.1:8090").rstrip("/") + "/api"
 hasard = random.Random(42)
 compte = {}
 
@@ -48,13 +49,74 @@ def creer(entite, corps):
         raise SystemExit(f"{entite} {corps} : {e.read().decode('utf-8')}")
 
 
-# ------------------------------------------------------------------ Établissements
+# ------------------------------------------------------------------ Scénarios
+# PUI : clé -> (libellé, cadre) ; le premier établissement desservi en est le siège.
+# Référentiel : code -> (libellé, contenu, PUI gestionnaire ou None) ;
+#   contenu : med, dm, dm_courant, dm_local, dmi, eco.
+# Établissement : court, nom, ville, type (MCO, SMR, HAD), gabarit de services, PUI,
+#   référentiels par nature (un code, ou une liste : commun puis local).
 
-ETABS = [
-    dict(cle="PINS", court="PIN", nom="Clinique des Pins", ville="Ville-Test-Nord", type="MCO", lits=200),
-    dict(cle="CHENES", court="CHE", nom="Clinique des Chênes", ville="Ville-Test-Sud", type="MCO", lits=200),
-    dict(cle="OLIVIERS", court="OLI", nom="Centre SMR des Oliviers", ville="Ville-Test-Est", type="SMR", lits=60),
-    dict(cle="GARRIGUE", court="GAR", nom="HAD de la Garrigue", ville="Ville-Test-Ouest", type="HAD", lits=200),
+def _mco(court, nom, ville, pui, refs):
+    return dict(court=court, nom=nom, ville=ville, type="MCO", gabarit="MCO", pui=pui, refs=refs)
+
+
+SCENARIOS = {
+    "1": dict(
+        puis={"PIN": ("PUI Clinique des Pins", "propre"), "CHE": ("PUI Clinique des Chênes", "propre"),
+              "OLI": ("PUI Centre SMR des Oliviers", "propre"), "GAR": ("PUI HAD de la Garrigue", "propre")},
+        refs={"MED-GRP": ("Médicaments du groupe", "med", "PIN"), "DM-MCO": ("DM des MCO", "dm", "PIN"),
+              "DM-SMRHAD": ("DM de soins courants SMR et HAD", "dm_courant", "OLI"),
+              "ECO-GRP": ("Économat du groupe", "eco", None),
+              "DMI-PIN": ("DMI Clinique des Pins", "dmi", "PIN"), "DMI-CHE": ("DMI Clinique des Chênes", "dmi", "CHE"),
+              "DMI-OLI": ("DMI Centre SMR des Oliviers", "dmi", "OLI"), "DMI-GAR": ("DMI HAD de la Garrigue", "dmi", "GAR")},
+        etabs=[
+            _mco("PIN", "Clinique des Pins", "Ville-Test-Nord", "PIN",
+                 {"medicament": "MED-GRP", "dm": "DM-MCO", "dmi": "DMI-PIN", "economat": "ECO-GRP"}),
+            _mco("CHE", "Clinique des Chênes", "Ville-Test-Sud", "CHE",
+                 {"medicament": "MED-GRP", "dm": "DM-MCO", "dmi": "DMI-CHE", "economat": "ECO-GRP"}),
+            dict(court="OLI", nom="Centre SMR des Oliviers", ville="Ville-Test-Est", type="SMR", gabarit="SMR", pui="OLI",
+                 refs={"medicament": "MED-GRP", "dm": "DM-SMRHAD", "dmi": "DMI-OLI", "economat": "ECO-GRP"}),
+            dict(court="GAR", nom="HAD de la Garrigue", ville="Ville-Test-Ouest", type="HAD", gabarit="HAD", pui="GAR",
+                 refs={"medicament": "MED-GRP", "dm": "DM-SMRHAD", "dmi": "DMI-GAR", "economat": "ECO-GRP"}),
+        ]),
+    "2": dict(
+        puis={"CENTRALE": ("PUI centrale des MCO", "convention"), "LAV": ("PUI SMR des Lavandes", "propre"),
+              "CYP": ("PUI SMR des Cyprès", "propre"), "AMA": ("PUI SMR des Amandiers", "propre"),
+              "LIT": ("PUI HAD du Littoral", "propre")},
+        refs={"MED-MCO": ("Médicaments des MCO", "med", "CENTRALE"), "DM-MCO": ("DM des MCO", "dm", "CENTRALE"),
+              "DM-SUD": ("DM propres à la Clinique du Sud", "dm_local", "CENTRALE"),
+              "DMI-MCO": ("DMI des MCO", "dmi", "CENTRALE"), "ECO-MCO": ("Économat des MCO", "eco", None),
+              "MED-SMRHAD": ("Médicaments des SMR et de la HAD", "med", "LAV"),
+              "DM-LAV": ("DM SMR des Lavandes", "dm_courant", "LAV"), "DM-CYP": ("DM SMR des Cyprès", "dm_courant", "CYP"),
+              "DM-AMA": ("DM SMR des Amandiers", "dm_courant", "AMA"), "DM-LIT": ("DM HAD du Littoral", "dm_courant", "LIT"),
+              "ECO-LAV": ("Économat SMR des Lavandes", "eco", None), "ECO-CYP": ("Économat SMR des Cyprès", "eco", None),
+              "ECO-AMA": ("Économat SMR des Amandiers", "eco", None), "ECO-LIT": ("Économat HAD du Littoral", "eco", None)},
+        etabs=[
+            _mco("NOR", "Clinique du Nord", "Ville-Test-Nord", "CENTRALE",
+                 {"medicament": "MED-MCO", "dm": "DM-MCO", "dmi": "DMI-MCO", "economat": "ECO-MCO"}),
+            _mco("CEN", "Clinique du Centre", "Ville-Test-Centre", "CENTRALE",
+                 {"medicament": "MED-MCO", "dm": "DM-MCO", "dmi": "DMI-MCO", "economat": "ECO-MCO"}),
+            _mco("SUD", "Clinique du Sud", "Ville-Test-Sud", "CENTRALE",
+                 {"medicament": "MED-MCO", "dm": ["DM-MCO", "DM-SUD"], "dmi": "DMI-MCO", "economat": "ECO-MCO"}),
+        ] + [
+            dict(court=c, nom=f"SMR des {n}", ville=v, type="SMR", gabarit="SMR_PETIT", pui=c,
+                 refs={"medicament": "MED-SMRHAD", "dm": f"DM-{c}", "economat": f"ECO-{c}"})
+            for c, n, v in [("LAV", "Lavandes", "Ville-Test-Est"), ("CYP", "Cyprès", "Ville-Test-Ouest"),
+                            ("AMA", "Amandiers", "Ville-Test-Plaine")]
+        ] + [
+            dict(court="LIT", nom="HAD du Littoral", ville="Ville-Test-Côte", type="HAD", gabarit="HAD", pui="LIT",
+                 refs={"medicament": "MED-SMRHAD", "dm": "DM-LIT", "economat": "ECO-LIT"}),
+        ]),
+}
+
+# DM propres à un site, en plus du référentiel commun (ex. : activité particulière).
+DM_LOCAUX = [
+    ("Kit de péridurale obstétricale", "PERF", True, "kit"),
+    ("Sonde de monitorage fœtal", "SONDES", True, "unité"),
+    ("Clamp de cordon ombilical", "SUTURE", True, "unité"),
+    ("Ventouse obstétricale à usage unique", "BLOC", True, "unité"),
+    ("Tire-lait, téterelle stérile", "PROT", True, "unité"),
+    ("Bracelet d'identification nouveau-né", "PROT", False, "unité"),
 ]
 
 # Services : (libellé, type, pôle, lits ou places, [UF (libellé, activité)])
@@ -92,6 +154,13 @@ SERVICES_HAD = [
     ("Hôtellerie et logistique", "logistique", None, 0, [("Économat et magasin", "autre")]),
     ("Direction", "administratif", None, 0, [("Administration", "autre")]),
 ]
+SERVICES_SMR_PETIT = [
+    ("SMR polyvalent", "soins", None, 40, [("Hospitalisation complète SMR polyvalent", "SMR"), ("Hôpital de jour SMR", "SMR")]),
+    ("Pharmacie", "logistique", None, 0, [("Pharmacie à usage intérieur", "autre")]),
+    ("Hôtellerie et logistique", "logistique", None, 0, [("Économat et magasin", "autre")]),
+    ("Direction", "administratif", None, 0, [("Administration", "autre")]),
+]
+SERVICES = {"MCO": SERVICES_MCO, "SMR": SERVICES_SMR, "SMR_PETIT": SERVICES_SMR_PETIT, "HAD": SERVICES_HAD}
 POLES = {"CHIR": "Pôle chirurgie", "MED": "Pôle médecine", "MT": "Pôle médico-technique"}
 
 # ------------------------------------------------------------------ Articles
@@ -303,40 +372,22 @@ def economat_liste():
 
 # ------------------------------------------------------------------ Chargement
 
-def charger():
-    t0 = time.time()
+def modifier(entite, ident, corps):
+    req = urllib.request.Request(f"{BASE}/e/{entite}/{ident}", data=json.dumps(corps).encode("utf-8"), method="PUT",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"{entite}/{ident} {corps} : {e.read().decode('utf-8')}")
 
-    # Fournisseurs
-    labos = [creer("fournisseur", {"raison_sociale": f"Laboratoire Test {i}", "type": "laboratoire"}) for i in range(1, 11)]
-    grossistes = [creer("fournisseur", {"raison_sociale": f"Grossiste-répartiteur Test {i}", "type": "grossiste"}) for i in (1, 2)]
-    fourn_dm = [creer("fournisseur", {"raison_sociale": f"Fournisseur DM Test {i}", "type": "fournisseur"}) for i in range(1, 6)]
-    fabric_dmi = [creer("fournisseur", {"raison_sociale": f"Fabricant implants Test {i}", "type": "fournisseur"}) for i in range(1, 6)]
-    fourn_eco = [creer("fournisseur", {"raison_sociale": f"Fournisseur hygiène Test {i}", "type": "fournisseur"}) for i in range(1, 4)]
-    for i in (1, 2):
-        creer("fournisseur", {"raison_sociale": f"Centrale d'achat Test {i}", "type": "centrale"})
 
-    # Référentiels
-    ref_med = creer("referentiel", {"code": "MED-GRP", "libelle": "Médicaments du groupe"})
-    ref_dm = creer("referentiel", {"code": "DM-MCO", "libelle": "DM des MCO"})
-    ref_dm2 = creer("referentiel", {"code": "DM-SMRHAD", "libelle": "DM de soins courants SMR et HAD"})
-    ref_eco = creer("referentiel", {"code": "ECO-GRP", "libelle": "Économat du groupe"})
-    ref_dmi = {e["cle"]: creer("referentiel", {"code": f"DMI-{e['court']}", "libelle": f"DMI {e['nom']}"}) for e in ETABS}
-    # Numérotation propre à chaque référentiel de DMI.
-    for e in ETABS:
-        creer("compteur", {"entite": "article", "variante": "dmi", "prefixe": f"DMI-{e['court']}-", "longueur": 4,
-                           "prochain": 1, "referentiel_id": ref_dmi[e["cle"]]["id"]})
-
-    # Familles communes au groupe (nomenclature consolidable entre sites).
-    fam = {nature: {code: creer("famille", {"libelle": lib, "nature": nature}) for code, lib in liste}
-           for nature, liste in FAMILLES.items()}
-    fam_med, fam_dm, fam_eco = fam["medicament"], fam["dm"], fam["economat"]
-    fam_dmi = {e["cle"]: fam["dmi"] for e in ETABS}
-
-    # Articles
-    meds = []
-    for dci, variantes, fam, liste, risque, options in MEDICAMENTS:
+def article_med(ref, fam):
+    """Médicaments d'un référentiel (une centaine, à partir des DCI et de leurs présentations)."""
+    out = []
+    for dci, variantes, famille, liste, risque, options in MEDICAMENTS:
         for dosage, forme, voie, unite in variantes:
-            corps = {"referentiel_id": ref_med["id"], "nature": "medicament", "famille_id": fam_med[fam]["id"],
+            corps = {"referentiel_id": ref["id"], "nature": "medicament", "famille_id": fam["medicament"][famille]["id"],
                      "designation": f"{dci} {dosage} {forme.lower()}", "dci": dci, "dosage": dosage, "forme": forme,
                      "voie_administration": voie, "unite_stock": unite, "unite_delivrance": unite, "liste": liste,
                      "a_risque": risque, "lot_entree": "obligatoire", "peremption_entree": "obligatoire",
@@ -345,129 +396,191 @@ def charger():
             corps.update(options)
             if corps.get("derive_sang"):
                 corps["lot_sortie"] = "obligatoire"
-            meds.append(creer("article", corps))
-    meds = meds[:100]
+            out.append(creer("article", corps))
+    return out
 
-    dms = [creer("article", {"referentiel_id": ref_dm["id"], "nature": "dm", "famille_id": fam_dm[fam]["id"],
-                             "designation": nom, "sterile": sterile, "usage_unique": True, "unite_stock": unite,
-                             "classe_dm": "IIa" if fam in ("INJ", "PERF", "SONDES") else ("Is" if sterile else "I"),
-                             "lot_entree": "obligatoire" if sterile else "facultatif",
-                             "peremption_entree": "obligatoire" if sterile else "sans_objet"})
-           for nom, fam, sterile, unite in dm_liste()]
-    # DM de soins courants du SMR et de la HAD : sans les consommables de bloc ni la suture.
-    dms2 = [creer("article", {"referentiel_id": ref_dm2["id"], "nature": "dm", "famille_id": fam_dm[fam_]["id"],
+
+def article_dm(ref, fam, liste):
+    return [creer("article", {"referentiel_id": ref["id"], "nature": "dm", "famille_id": fam["dm"][f]["id"],
                               "designation": nom, "sterile": sterile, "usage_unique": True, "unite_stock": unite,
-                              "classe_dm": "IIa" if fam_ in ("INJ", "PERF", "SONDES") else ("Is" if sterile else "I"),
+                              "classe_dm": "IIa" if f in ("INJ", "PERF", "SONDES") else ("Is" if sterile else "I"),
                               "lot_entree": "obligatoire" if sterile else "facultatif",
                               "peremption_entree": "obligatoire" if sterile else "sans_objet"})
-            for nom, fam_, sterile, unite in dm_liste() if fam_ not in ("BLOC", "SUTURE")]
+            for nom, f, sterile, unite in liste]
 
-    dmis = {}
-    for e in ETABS:
-        dmis[e["cle"]] = [creer("article", {
-            "referentiel_id": ref_dmi[e["cle"]]["id"], "nature": "dmi", "famille_id": fam_dmi[e["cle"]][fam]["id"],
-            "designation": nom, "sterile": True, "usage_unique": True, "classe_dm": "III" if fam in ("CARDIO", "HANCHE", "GENOU") else "IIb",
-            "unite_stock": "unité", "lot_entree": "obligatoire", "lot_sortie": "obligatoire",
-            "serie_entree": "obligatoire", "serie_sortie": "obligatoire", "peremption_entree": "obligatoire"})
-            for nom, fam in dmi_liste()]
 
-    ecos = [creer("article", {"referentiel_id": ref_eco["id"], "nature": "economat", "famille_id": fam_eco[fam]["id"],
+def article_dmi(ref, fam):
+    return [creer("article", {"referentiel_id": ref["id"], "nature": "dmi", "famille_id": fam["dmi"][f]["id"],
+                              "designation": nom, "sterile": True, "usage_unique": True,
+                              "classe_dm": "III" if f in ("CARDIO", "HANCHE", "GENOU") else "IIb",
+                              "unite_stock": "unité", "lot_entree": "obligatoire", "lot_sortie": "obligatoire",
+                              "serie_entree": "obligatoire", "serie_sortie": "obligatoire", "peremption_entree": "obligatoire"})
+            for nom, f in dmi_liste()]
+
+
+def article_eco(ref, fam):
+    return [creer("article", {"referentiel_id": ref["id"], "nature": "economat", "famille_id": fam["economat"][f]["id"],
                               "designation": nom, "unite_achat": "carton", "unite_stock": "unité",
                               "coef_achat_stock": hasard.choice([1, 6, 10, 12, 20, 50])})
-            for nom, fam in economat_liste()]
+            for nom, f in economat_liste()]
 
-    # Prix : médicaments (laboratoire puis grossiste), DM, économat pour le groupe ; DMI par établissement.
-    for a in meds:
-        creer("article_fournisseur", {"article_id": a["id"], "fournisseur_id": hasard.choice(labos)["id"], "rang": 1,
+
+def prix(a, contenu, f):
+    """Prix fournisseurs d'un article, pour tout le groupe."""
+    if contenu == "med":
+        creer("article_fournisseur", {"article_id": a["id"], "fournisseur_id": hasard.choice(f["labos"])["id"], "rang": 1,
                                       "prix_unitaire_ht": round(hasard.uniform(0.05, 40), 4), "taux_tva": 2.1})
-        creer("article_fournisseur", {"article_id": a["id"], "fournisseur_id": hasard.choice(grossistes)["id"], "rang": 2,
+        creer("article_fournisseur", {"article_id": a["id"], "fournisseur_id": hasard.choice(f["grossistes"])["id"], "rang": 2,
                                       "prix_unitaire_ht": round(hasard.uniform(0.05, 45), 4), "taux_tva": 2.1})
-    for a in dms + dms2:
-        creer("article_fournisseur", {"article_id": a["id"], "fournisseur_id": hasard.choice(fourn_dm)["id"], "rang": 1,
+    elif contenu.startswith("dm"):
+        creer("article_fournisseur", {"article_id": a["id"], "fournisseur_id": hasard.choice(f["dm"])["id"], "rang": 1,
                                       "prix_unitaire_ht": round(hasard.uniform(0.02, 15), 4), "taux_tva": 20})
-    for a in ecos:
-        creer("article_fournisseur", {"article_id": a["id"], "fournisseur_id": hasard.choice(fourn_eco)["id"], "rang": 1,
+    elif contenu == "dmi":
+        creer("article_fournisseur", {"article_id": a["id"], "fournisseur_id": hasard.choice(f["dmi"])["id"], "rang": 1,
+                                      "prix_unitaire_ht": round(hasard.uniform(80, 4500), 2), "taux_tva": 5.5})
+    else:
+        creer("article_fournisseur", {"article_id": a["id"], "fournisseur_id": hasard.choice(f["eco"])["id"], "rang": 1,
                                       "prix_unitaire_ht": round(hasard.uniform(0.5, 60), 4), "taux_tva": 20})
 
-    # Établissements et leur structure
-    for e in ETABS:
+
+def charger(config):
+    t0 = time.time()
+
+    fourn = {
+        "labos": [creer("fournisseur", {"raison_sociale": f"Laboratoire Test {i}", "type": "laboratoire"}) for i in range(1, 11)],
+        "grossistes": [creer("fournisseur", {"raison_sociale": f"Grossiste-répartiteur Test {i}", "type": "grossiste"}) for i in (1, 2)],
+        "dm": [creer("fournisseur", {"raison_sociale": f"Fournisseur DM Test {i}", "type": "fournisseur"}) for i in range(1, 6)],
+        "dmi": [creer("fournisseur", {"raison_sociale": f"Fabricant implants Test {i}", "type": "fournisseur"}) for i in range(1, 6)],
+        "eco": [creer("fournisseur", {"raison_sociale": f"Fournisseur hygiène Test {i}", "type": "fournisseur"}) for i in range(1, 4)],
+    }
+    for i in (1, 2):
+        creer("fournisseur", {"raison_sociale": f"Centrale d'achat Test {i}", "type": "centrale"})
+
+    # PUI d'abord : elles gèrent les référentiels.
+    puis = {cle: creer("pui", {"libelle": lib, "cadre": cadre, "pharmacien_gerant": f"Pharmacien gérant {cle.title()}"})
+            for cle, (lib, cadre) in config["puis"].items()}
+
+    # Familles communes au groupe, puis référentiels, leurs articles et leurs prix.
+    fam = {nature: {code: creer("famille", {"libelle": lib, "nature": nature}) for code, lib in liste}
+           for nature, liste in FAMILLES.items()}
+    refs, articles = {}, {}
+    for code, (libelle, contenu, gestionnaire) in config["refs"].items():
+        ref = refs[code] = creer("referentiel", {"abrege": code, "libelle": libelle,
+                                                 "pui_gestionnaire_id": puis[gestionnaire]["id"] if gestionnaire else None})
+        if contenu == "med":
+            lot = article_med(ref, fam)
+        elif contenu == "dm":
+            lot = article_dm(ref, fam, dm_liste())
+        elif contenu == "dm_courant":
+            lot = article_dm(ref, fam, [d for d in dm_liste() if d[1] not in ("BLOC", "SUTURE")])
+        elif contenu == "dm_local":
+            lot = article_dm(ref, fam, DM_LOCAUX)
+        elif contenu == "dmi":
+            lot = article_dmi(ref, fam)
+        else:
+            lot = article_eco(ref, fam)
+        articles[code] = lot
+        for a in lot:
+            prix(a, contenu, fourn)
+
+    sieges = {}  # PUI -> magasins du siège, par rôle (sources des dépôts des autres sites)
+
+    for e in config["etabs"]:
         ej = creer("entite_juridique", {"raison_sociale": f"SAS {e['nom']}"})
-        pui = creer("pui", {"libelle": f"PUI {e['nom']}", "pharmacien_gerant": f"Pharmacien gérant {e['cle'].title()}"})
+        pui = puis[e["pui"]]
         etab = creer("etablissement", {"entite_juridique_id": ej["id"], "raison_sociale": e["nom"], "nom_usuel": e["nom"],
                                        "commune": e["ville"], "pui_id": pui["id"], "secteur_financement": "ex_oqn"})
         e["id"] = etab["id"]
-        for entite, suffixe, longueur in [("service", "SRV", 2), ("uf", "UF", 3), ("magasin", "MAG", 2),
-                                          ("pole", "POL", 1)]:
+        siege = e["pui"] not in sieges
+        if siege:
+            modifier("pui", pui["id"], {"etablissement_siege_id": etab["id"]})
+        for entite, suffixe, longueur in [("service", "SRV", 2), ("uf", "UF", 3), ("magasin", "MAG", 2), ("pole", "POL", 1)]:
             creer("compteur", {"entite": entite, "prefixe": f"{e['court']}-{suffixe}", "longueur": longueur,
                                "prochain": 1, "etablissement_id": etab["id"]})
-        creer("etablissement_referentiel", {"etablissement_id": etab["id"], "nature": "medicament", "referentiel_id": ref_med["id"]})
-        creer("etablissement_referentiel", {"etablissement_id": etab["id"], "nature": "dmi", "referentiel_id": ref_dmi[e["cle"]]["id"]})
-        creer("etablissement_referentiel", {"etablissement_id": etab["id"], "nature": "economat", "referentiel_id": ref_eco["id"]})
-        creer("etablissement_referentiel", {"etablissement_id": etab["id"], "nature": "dm",
-                                            "referentiel_id": (ref_dm if e["type"] == "MCO" else ref_dm2)["id"]})
+        for nature, codes in e["refs"].items():
+            for code in (codes if isinstance(codes, list) else [codes]):
+                creer("etablissement_referentiel", {"etablissement_id": etab["id"], "nature": nature,
+                                                    "referentiel_id": refs[code]["id"]})
 
-        services = {"MCO": SERVICES_MCO, "SMR": SERVICES_SMR, "HAD": SERVICES_HAD}[e["type"]]
         poles = {}
         if e["type"] == "MCO":
             poles = {code: creer("pole", {"etablissement_id": etab["id"], "libelle": lib}) for code, lib in POLES.items()}
-        e["uf_soins"] = []
-        e["ufs"] = {}
-        e["services"] = {}
-        for i, (lib, typ, pole, lits, ufs) in enumerate(services, 1):
+        e["uf_soins"], e["ufs"], e["services"] = [], {}, {}
+        for i, (lib, typ, pole, lits, ufs) in enumerate(SERVICES[e["gabarit"]], 1):
             srv = creer("service", {"etablissement_id": etab["id"], "libelle": lib, "type": typ,
                                     "pole_id": poles[pole]["id"] if pole else None})
             e["services"][lib] = srv
             for j, (lib_uf, act) in enumerate(ufs, 1):
                 uf = creer("uf", {"etablissement_id": etab["id"], "service_id": srv["id"], "libelle": lib_uf, "activite": act,
-                                  "centre_cout": f"{e['cle'][:3]}-{i:02d}{j}"})
+                                  "centre_cout": f"{e['court']}-{i:02d}{j}"})
                 e["ufs"][lib_uf] = uf
                 if typ == "soins" and j == 1:
                     e["uf_soins"].append((lib, uf))
 
-        # Magasins et emplacements
-        def magasin(lib, typ, emplacements, uf=None):
-            m = creer("magasin", {"etablissement_id": etab["id"], "libelle": lib, "type": typ, "uf_id": uf["id"] if uf else None})
+        def magasin(lib, typ, role, emplacements, uf=None, source=None):
+            m = creer("magasin", {"etablissement_id": etab["id"], "libelle": lib, "type": typ, "role": role,
+                                  "uf_id": uf["id"] if uf else None, "magasin_source_id": source["id"] if source else None})
             for code in emplacements:
                 creer("emplacement", {"magasin_id": m["id"], "libelle": code})
             return m
 
-        magasin("Pharmacie, réserve principale", "pui", [f"Allée {a}, étagère {n}" for a in "ABCDEF" for n in range(1, 6)])
-        magasin("Pharmacie, chambre froide", "pui", [f"Froid {n}" for n in range(1, 5)])
-        magasin("Pharmacie, coffre des stupéfiants", "pui", ["Coffre, tiroir 1", "Coffre, tiroir 2"])
-        magasin("Pharmacie, réserve des DMI", "pui", [f"Rayonnage DMI {n}" for n in range(1, 11)])
-        magasin("Magasin de l'économat", "economat", [f"Économat, travée {n}" for n in range(1, 11)])
+        # Magasins de PUI. Au siège : réserve, froid, coffre, DMI, approvisionnés par les fournisseurs.
+        # Sur les autres sites d'une PUI centrale : dépôts approvisionnés par le magasin du siège de même rôle.
+        if siege:
+            sieges[e["pui"]] = s = {
+                "reserve": magasin("Pharmacie, réserve principale", "pui", "reserve",
+                                   [f"Allée {a}, étagère {n}" for a in "ABCDEF" for n in range(1, 6)]),
+                "froid": magasin("Pharmacie, chambre froide", "pui", "froid", [f"Froid {n}" for n in range(1, 5)]),
+                "coffre": magasin("Pharmacie, coffre des stupéfiants", "pui", "coffre_stupefiants", ["Coffre, tiroir 1", "Coffre, tiroir 2"]),
+            }
+            if "dmi" in e["refs"]:
+                s["dmi"] = magasin("Pharmacie, réserve des DMI", "pui", "dmi", [f"Rayonnage DMI {n}" for n in range(1, 11)])
+            local = s
+        else:
+            s = sieges[e["pui"]]
+            nom = f"Dépôt de la {config['puis'][e['pui']][0]}"
+            local = {
+                "reserve": magasin(f"{nom}, réserve", "pui", "depot", [f"Allée {a}, étagère {n}" for a in "AB" for n in range(1, 6)], source=s["reserve"]),
+                "froid": magasin(f"{nom}, réfrigérateur", "pui", "froid", ["Froid 1", "Froid 2"], source=s["froid"]),
+                "coffre": magasin(f"{nom}, coffre des stupéfiants", "pui", "coffre_stupefiants", ["Coffre, tiroir 1"], source=s["coffre"]),
+            }
+            if "dmi" in e["refs"]:
+                local["dmi"] = magasin(f"{nom}, DMI", "pui", "dmi", [f"Rayonnage DMI {n}" for n in range(1, 5)], source=s["dmi"])
+        magasin("Magasin de l'économat", "economat", "reserve", [f"Économat, travée {n}" for n in range(1, 6)])
         for lib, uf in e["uf_soins"]:
-            magasin(f"Armoire {lib}" if e["type"] != "HAD" else f"Dépôt {lib}", "service", [], uf)
+            if e["type"] == "HAD":
+                magasin(f"Dépôt {lib}", "service", "depot_antenne", [], uf, local["reserve"])
+            else:
+                magasin(f"Armoire {lib}", "service", "armoire", [], uf, local["reserve"])
         if e["type"] == "MCO":
-            magasin("Arsenal du bloc opératoire", "service", [f"Arsenal, rayon {n}" for n in range(1, 9)],
-                    e["ufs"]["Salles d'opération"])
+            magasin("Arsenal du bloc opératoire", "service", "arsenal", [f"Arsenal, rayon {n}" for n in range(1, 9)],
+                    e["ufs"]["Salles d'opération"], local["reserve"])
 
-        # Articles-sites : tout ce que l'établissement utilise, avec des seuils.
         for nature, (mini, maxi) in {"medicament": (10, 40), "dm": (20, 100), "dmi": (1, 3), "economat": (5, 30)}.items():
-            n = appeler(f"/etablissement/{etab['id']}/referencer", {"nature": nature, "stock_mini": mini, "stock_maxi": maxi})["crees"]
-            compte["article_site"] = compte.get("article_site", 0) + n
-        # Prix des DMI : propres à l'établissement.
-        for a in dmis[e["cle"]]:
-            creer("article_fournisseur", {"article_id": a["id"], "fournisseur_id": hasard.choice(fabric_dmi)["id"],
-                                          "etablissement_id": etab["id"], "rang": 1,
-                                          "prix_unitaire_ht": round(hasard.uniform(80, 4500), 2), "taux_tva": 5.5})
+            if nature in e["refs"]:
+                n = appeler(f"/etablissement/{etab['id']}/referencer",
+                            {"nature": nature, "stock_mini": mini, "stock_maxi": maxi})["crees"]
+                compte["article_site"] = compte.get("article_site", 0) + n
 
     # Médicaments à risque propres à certains services (en plus de la liste de la PUI).
     risques = {"Chlorure de potassium": ["Cardiologie", "Unité de surveillance continue", "SMR polyvalent", "Antenne Nord"],
                "Insuline": ["Médecine polyvalente", "SMR polyvalent", "Antenne Sud"],
                "Méthotrexate": ["Médecine polyvalente", "Antenne Ouest"]}
-    for a in meds:
-        for prefixe, services in risques.items():
-            if a["dci"].startswith(prefixe):
-                for e in ETABS:
+    for e in config["etabs"]:
+        for a in articles[e["refs"]["medicament"]]:
+            for prefixe, services in risques.items():
+                if a["dci"].startswith(prefixe):
                     for s in services:
                         if s in e["services"]:
                             creer("risque_service", {"article_id": a["id"], "service_id": e["services"][s]["id"],
-                                                     "motif": "Électrolyte concentré" if prefixe.startswith("Chlorure") else "Médicament à haut risque"})
+                                                     "motif": "Électrolyte concentré" if prefixe.startswith("Chlorure")
+                                                     else "Médicament à haut risque"})
 
-    print(f"Chargé en {time.time() - t0:.0f} s :")
+    print(f"Scénario {SCENARIO} chargé en {time.time() - t0:.0f} s :")
     for k, v in sorted(compte.items()):
         print(f"  {k:28} {v:6}")
 
 
-charger()
+if SCENARIO not in SCENARIOS:
+    raise SystemExit(f"Scénario inconnu : {SCENARIO} (choix : {', '.join(SCENARIOS)})")
+charger(SCENARIOS[SCENARIO])

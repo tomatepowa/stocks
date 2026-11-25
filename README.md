@@ -15,7 +15,10 @@ Pages : http://127.0.0.1:8090. Les migrations de `migrations/` s'appliquent au d
 
 En développement : `docker compose up -d db`, puis `cargo run` (base sur le port 5433 de ce poste).
 
-Groupe de test complet (base vide, serveur lancé) : `python -I outils/groupe_test.py`. Il charge 4 établissements (2 MCO, 1 SMR, 1 HAD), leurs structures, environ 730 articles et 1 470 articles-sites. Tous les noms sont fictifs, et aucun code officiel n'est renseigné.
+Groupe de test complet (base vide, serveur lancé) : `python -I outils/groupe_test.py --scenario=1` ou `--scenario=2`. Tous les noms sont fictifs, et aucun code officiel n'est renseigné.
+
+- **Scénario 1** : 4 établissements (2 MCO, 1 SMR, 1 HAD), chacun avec sa PUI.
+- **Scénario 2** : une PUI centrale pour 3 MCO, avec des dépôts sur chaque site ; 3 petits SMR et une HAD, chacun avec sa PUI.
 
 ## Contenu
 
@@ -33,7 +36,8 @@ Groupe de test complet (base vide, serveur lancé) : `python -I outils/groupe_te
   - traçabilité obligatoire des DMI ;
   - listes I, II et stupéfiants réservées aux médicaments ;
   - cohérence entre établissement, service, UF, référentiel et famille.
-- **Compteurs de codes** : un compteur par fichier codé (préfixe, longueur, prochain numéro), avec une variante possible selon la nature ou le type. Un code laissé vide est attribué par la base, et les codes déjà pris sont sautés.
+- **Codes** : attribués par la base à la création, jamais saisis ni modifiés. Un compteur par fichier (préfixe, longueur, prochain numéro), avec une variante selon la nature ou le type (articles : MED, DM, DMI, ECO), et au besoin un compteur propre à un établissement pour la structure (UF, services, magasins). Sans compteur, la base en crée un. L'appartenance d'un article à un référentiel se lit dans l'abrégé du référentiel, pas dans le code.
+- **Fournisseur principal** : un seul par article et par portée (groupe ou établissement) ; en désigner un nouveau fait passer l'ancien au rang 2.
 - **Pages** : liste avec recherche et filtres. La fiche s'ouvre en page entière : en-tête et pastilles, cartes par section, champs selon la nature, fiches liées, historique.
 - **Sources externes** (centrales, référentiels) :
   - un article est lié à chaque source par le code article de cette source ;
