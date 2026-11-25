@@ -158,6 +158,18 @@ function contexteFormulaire(form, c, source = etat.courant) {
     const magasin = ["magasin_id", "magasin_source_id", "magasin_destination_id"].map((k) => form.elements[k]).find((el) => el && el.value);
     if (magasin) p._utilisable_magasin = magasin.value;
   }
+  // Mouvement : on ne propose que ce qui a un sens pour le type choisi.
+  if (source.nom === "mouvement" && form.elements.type) {
+    const type = form.elements.type.value;
+    const val = (k) => (form.elements[k] ? form.elements[k].value : "");
+    const depuisStock = ["transfert", "deplacement", "sortie", "retour_fournisseur", "destruction", "inventaire_moins"].includes(type);
+    // Réception : seulement les magasins pouvant recevoir cet article d'un fournisseur (tête de chaîne,
+    // bon type, coffre pour un stupéfiant).
+    if (c.col === "magasin_destination_id" && type === "reception" && val("article_id")) p._reception = val("article_id");
+    // Sorties, transferts… : seulement les magasins ayant l'article en stock, et inversement.
+    if (c.col === "magasin_source_id" && depuisStock && val("article_id")) p._avec_stock = val("article_id");
+    if (c.col === "article_id" && depuisStock && val("magasin_source_id")) p._en_stock = val("magasin_source_id");
+  }
   if (cible.champs.some((x) => x.col === "actif")) p.actif = "true";
   return p;
 }

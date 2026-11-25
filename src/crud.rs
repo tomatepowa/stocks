@@ -116,6 +116,9 @@ fn colonnes_derivees(e: &Entite) -> String {
 /// étiquette (5 000 au plus), avec l'étiquette de chaque lien affiché en colonne (`_l_<col>`).
 /// `~col` : la valeur, ou vide (ex. : familles d'un référentiel et familles communes).
 /// `_utilisable_par` (articles) : articles des référentiels qu'utilise l'établissement.
+/// `_reception` (magasins) : magasins pouvant recevoir cet article d'un fournisseur.
+/// `_avec_stock` (magasins) : magasins ayant cet article en stock ; `_en_stock` (articles) : articles en
+/// stock dans ce magasin.
 /// En-tête `X-Total` : nombre de lignes sans la limite.
 pub async fn lister(
     State(etat): State<Arc<Etat>>,
@@ -142,6 +145,21 @@ pub async fn lister(
         ));
     }
     for (k, v) in &params {
+        let filtre_special = match (k.as_str(), e.table) {
+            ("_reception", "magasin") => Some("magasin_peut_recevoir(t.id, $::text::bigint)"),
+            ("_avec_stock", "magasin") => Some(
+                "exists (select 1 from stock s where s.magasin_id = t.id and s.article_id = $::text::bigint and s.quantite > 0)",
+            ),
+            ("_en_stock", "article") => Some(
+                "exists (select 1 from stock s where s.article_id = t.id and s.magasin_id = $::text::bigint and s.quantite > 0)",
+            ),
+            _ => None,
+        };
+        if let Some(modele) = filtre_special {
+            vals.push(v.clone());
+            conds.push(modele.replace('$', &format!("${}", vals.len())));
+            continue;
+        }
         if k == "_utilisable_magasin" && e.table == "article" {
             vals.push(v.clone());
             conds.push(format!(
