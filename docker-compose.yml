@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: stocks
+      POSTGRES_USER: stocks
+      POSTGRES_PASSWORD: stocks_dev
+    ports:
+      - "127.0.0.1:${PORT_BASE:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stocks -d stocks"]
+      interval: 5s
+      retries: 60
+
+  # Pages et API : http://127.0.0.1:8090. Les migrations s'appliquent au démarrage.
+  serveur:
+    build: .
+    image: stocks
+    ports:
+      - "127.0.0.1:${PORT_SERVEUR:-8090}:8090"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
