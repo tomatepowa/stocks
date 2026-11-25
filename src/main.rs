@@ -4,6 +4,7 @@
 //! (`/api/…`) et les pages de `web/`.
 
 mod crud;
+mod referentiels;
 mod schema;
 
 use std::path::PathBuf;
@@ -11,7 +12,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use axum::routing::get;
+use axum::extract::DefaultBodyLimit;
+use axum::routing::{get, post};
 use axum::Router;
 use clap::Parser;
 use deadpool_postgres::{Manager, Pool};
@@ -51,6 +53,9 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("001_socle", include_str!("../migrations/001_socle.sql")),
     ("002_compteurs_articles", include_str!("../migrations/002_compteurs_articles.sql")),
     ("003_magasin_pui", include_str!("../migrations/003_magasin_pui.sql")),
+    ("004_referentiels_externes", include_str!("../migrations/004_referentiels_externes.sql")),
+    ("005_referentiels_par_nature", include_str!("../migrations/005_referentiels_par_nature.sql")),
+    ("006_compteurs_familles", include_str!("../migrations/006_compteurs_familles.sql")),
 ];
 
 async fn migrer(pool: &Pool) -> Result<()> {
@@ -97,6 +102,16 @@ async fn main() -> Result<()> {
         .route("/api/e/{entite}", get(crud::lister).post(crud::creer))
         .route("/api/e/{entite}/{id}", get(crud::lire).put(crud::modifier).delete(crud::supprimer))
         .route("/api/journal/{entite}/{id}", get(crud::journal))
+        .route("/api/etablissement/{id}/referencer", post(crud::referencer))
+        .route("/api/article/{id}/sources", get(referentiels::sources))
+        .route("/api/article/{id}/reprendre", post(referentiels::reprendre))
+        .route("/api/catalogue", get(referentiels::rechercher))
+        .route("/api/catalogue/imports", get(referentiels::imports))
+        .route(
+            "/api/catalogue/import",
+            // Un catalogue complet peut peser plusieurs dizaines de Mo.
+            post(referentiels::importer).layer(DefaultBodyLimit::max(200 * 1024 * 1024)),
+        )
         .with_state(etat)
         .fallback_service(ServeDir::new(&cli.web));
 

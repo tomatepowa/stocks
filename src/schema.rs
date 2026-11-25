@@ -32,10 +32,12 @@ pub struct Champ {
     pub badge: &'static str,
     /// Lien vers le parent dans la structure (1 = premier choisi s'il est renseigné, puis 2…) ; 0 : aucun.
     pub parent: u8,
+    /// Champ d'article qu'une source externe (centrale…) peut renseigner.
+    pub externe: bool,
 }
 
 const fn c(col: &'static str, libelle: &'static str, genre: Genre) -> Champ {
-    Champ { col, libelle, genre, requis: false, liste: false, aide: "", section: "", quand: None, badge: "", parent: 0 }
+    Champ { col, libelle, genre, requis: false, liste: false, aide: "", section: "", quand: None, badge: "", parent: 0, externe: false }
 }
 
 impl Champ {
@@ -65,6 +67,10 @@ impl Champ {
     }
     const fn p(mut self, rang: u8) -> Self {
         self.parent = rang;
+        self
+    }
+    const fn x(mut self) -> Self {
+        self.externe = true;
         self
     }
 }
@@ -154,11 +160,24 @@ pub static ENTITES: &[Entite] = &[
             c("finess_geographique", "FINESS géographique", Texte).l().s("Identifiants"),
             c("finess_pmsi", "FINESS PMSI (ePMSI)", Texte).s("Identifiants"),
             c("secteur_financement", "Secteur de financement", Choix(&[("ex_oqn", "Privé (ex-OQN)"), ("ex_dg", "Public / ESPIC (ex-DG)")])).req().s("Identifiants").badge("*"),
-            c("referentiel_id", "Référentiel articles", Ref("referentiel")).req().l().s("Organisation"),
             c("pui_id", "PUI", Ref("pui")).l().s("Organisation").aide("Même PUI pour plusieurs établissements : mode PUI centrale."),
             c("adresse", "Adresse", Texte).s("Adresse"),
             c("code_postal", "Code postal", Texte).s("Adresse"),
             c("commune", "Commune", Texte).l().s("Adresse"),
+        ],
+    },
+    Entite {
+        nom: "etablissement_referentiel",
+        table: "etablissement_referentiel",
+        libelle: "Référentiel utilisé",
+        pluriel: "Référentiels des établissements",
+        groupe: "Structure",
+        etiquette: "(select e.code from etablissement e where e.id = t.etablissement_id) || ' / ' || t.nature \
+                    || ' : ' || (select r.code || ' – ' || r.libelle from referentiel r where r.id = t.referentiel_id)",
+        champs: &[
+            c("etablissement_id", "Établissement", Ref("etablissement")).req().l().p(1),
+            c("nature", "Nature d'article", Choix(NATURES)).req().l(),
+            c("referentiel_id", "Référentiel", Ref("referentiel")).req().l(),
         ],
     },
     Entite {
@@ -248,9 +267,9 @@ pub static ENTITES: &[Entite] = &[
         libelle: "Famille",
         pluriel: "Familles",
         groupe: "Articles",
-        etiquette: "t.code || ' – ' || t.libelle",
+        etiquette: "t.code || ' – ' || t.libelle || coalesce(' · ' || (select r.code from referentiel r where r.id = t.referentiel_id), ' · commune')",
         champs: &[
-            c("referentiel_id", "Référentiel", Ref("referentiel")).req().l().p(1),
+            c("referentiel_id", "Référentiel", Ref("referentiel")).l().p(1).aide("Vide : famille commune à tous les référentiels du groupe."),
             c("code", "Code", Texte).l().aide(CODE_AUTO),
             c("libelle", "Libellé", Texte).req().l(),
             c("nature", "Nature", Choix(NATURES)).req().l().badge("*"),
@@ -264,47 +283,47 @@ pub static ENTITES: &[Entite] = &[
         libelle: "Article",
         pluriel: "Articles",
         groupe: "Articles",
-        etiquette: "t.code || ' – ' || t.designation",
+        etiquette: "t.code || ' – ' || t.designation || ' · ' || (select r.code from referentiel r where r.id = t.referentiel_id)",
         champs: &[
             c("referentiel_id", "Référentiel", Ref("referentiel")).req().l().s("Identification").p(2),
             c("code", "Code", Texte).l().aide(CODE_AUTO).s("Identification"),
-            c("designation", "Désignation", Texte).req().l().s("Identification"),
+            c("designation", "Désignation", Texte).req().l().s("Identification").x(),
             c("nature", "Nature", Choix(NATURES)).req().l().s("Identification").badge("*"),
             c("famille_id", "Famille", Ref("famille")).l().s("Identification").p(1),
-            c("laboratoire_titulaire", "Laboratoire titulaire / fabricant", Texte).s("Identification").quand("nature", SANTE),
-            c("conditionnement", "Conditionnement", Texte).s("Identification").aide("Ex. : boîte de 10 ampoules de 1 mL."),
+            c("laboratoire_titulaire", "Laboratoire titulaire / fabricant", Texte).s("Identification").quand("nature", SANTE).x(),
+            c("conditionnement", "Conditionnement", Texte).s("Identification").aide("Ex. : boîte de 10 ampoules de 1 mL.").x(),
             c("actif", "Actif", Booleen).s("Identification"),
 
-            c("dci", "DCI", Texte).l().s("Médicament").quand("nature", MED),
-            c("dosage", "Dosage", Texte).s("Médicament").quand("nature", MED),
-            c("forme", "Forme", Texte).s("Médicament").quand("nature", MED),
-            c("voie_administration", "Voie d'administration", Texte).s("Médicament").quand("nature", MED),
-            c("code_atc", "Code ATC", Texte).s("Médicament").quand("nature", MED),
+            c("dci", "DCI", Texte).l().s("Médicament").quand("nature", MED).x(),
+            c("dosage", "Dosage", Texte).s("Médicament").quand("nature", MED).x(),
+            c("forme", "Forme", Texte).s("Médicament").quand("nature", MED).x(),
+            c("voie_administration", "Voie d'administration", Texte).s("Médicament").quand("nature", MED).x(),
+            c("code_atc", "Code ATC", Texte).s("Médicament").quand("nature", MED).x(),
             c("au_livret", "Au livret thérapeutique", Booleen).s("Médicament").quand("nature", MED),
-            c("prescription_restreinte", "Prescription restreinte", Choix(&[("aucune", "Aucune"), ("reserve_hospitaliere", "Réserve hospitalière"), ("prescription_initiale_hospitaliere", "Prescription initiale hospitalière"), ("prescription_reservee_specialistes", "Prescription réservée à des spécialistes"), ("surveillance_particuliere", "Surveillance particulière")])).s("Médicament").quand("nature", MED).badge("*"),
+            c("prescription_restreinte", "Prescription restreinte", Choix(&[("aucune", "Aucune"), ("reserve_hospitaliere", "Réserve hospitalière"), ("prescription_initiale_hospitaliere", "Prescription initiale hospitalière"), ("prescription_reservee_specialistes", "Prescription réservée à des spécialistes"), ("surveillance_particuliere", "Surveillance particulière")])).s("Médicament").quand("nature", MED).badge("*").x(),
 
-            c("classe_dm", "Classe du DM", Choix(&[("I", "I"), ("Is", "I stérile"), ("Im", "I avec mesurage"), ("IIa", "IIa"), ("IIb", "IIb"), ("III", "III")])).s("Dispositif médical").quand("nature", DM),
-            c("sterile", "Stérile", Booleen).s("Dispositif médical").quand("nature", DM),
-            c("usage_unique", "Usage unique", Booleen).s("Dispositif médical").quand("nature", DM),
+            c("classe_dm", "Classe du DM", Choix(&[("I", "I"), ("Is", "I stérile"), ("Im", "I avec mesurage"), ("IIa", "IIa"), ("IIb", "IIb"), ("III", "III")])).s("Dispositif médical").quand("nature", DM).x(),
+            c("sterile", "Stérile", Booleen).s("Dispositif médical").quand("nature", DM).x(),
+            c("usage_unique", "Usage unique", Booleen).s("Dispositif médical").quand("nature", DM).x(),
 
-            c("ucd13", "Code UCD 13", Texte).l().s("Codes").quand("nature", MED),
-            c("ucd7", "Code UCD 7", Texte).s("Codes").quand("nature", MED),
-            c("cip13", "Code CIP 13", Texte).s("Codes").quand("nature", MED),
-            c("lpp", "Code LPP", Texte).s("Codes").quand("nature", DM),
-            c("gtin", "GTIN / EAN", Texte).s("Codes"),
+            c("ucd13", "Code UCD 13", Texte).l().s("Codes").quand("nature", MED).x(),
+            c("ucd7", "Code UCD 7", Texte).s("Codes").quand("nature", MED).x(),
+            c("cip13", "Code CIP 13", Texte).s("Codes").quand("nature", MED).x(),
+            c("lpp", "Code LPP", Texte).s("Codes").quand("nature", DM).x(),
+            c("gtin", "GTIN / EAN", Texte).s("Codes").x(),
 
-            c("liste", "Classement", Choix(&[("aucune", "Aucun"), ("liste_I", "Liste I"), ("liste_II", "Liste II"), ("stupefiant", "Stupéfiant"), ("assimile_stupefiant", "Assimilé stupéfiant")])).req().l().s("Sécurité et conservation").quand("nature", MED).badge("*"),
+            c("liste", "Classement", Choix(&[("aucune", "Aucun"), ("liste_I", "Liste I"), ("liste_II", "Liste II"), ("stupefiant", "Stupéfiant"), ("assimile_stupefiant", "Assimilé stupéfiant")])).req().l().s("Sécurité et conservation").quand("nature", MED).badge("*").x(),
             c("a_risque", "À risque (liste de la PUI)", Booleen).l().s("Sécurité et conservation").quand("nature", MED).badge("À risque"),
-            c("derive_sang", "Médicament dérivé du sang", Booleen).s("Sécurité et conservation").quand("nature", MED).badge("MDS").aide("Impose le lot obligatoire à la réception et à la sortie."),
-            c("cytotoxique", "Cytotoxique", Booleen).s("Sécurité et conservation").quand("nature", MED).badge("Cytotoxique"),
-            c("conservation", "Conservation", Choix(&[("ambiante", "Température ambiante"), ("refrigere", "Réfrigéré (2 à 8 °C)"), ("congele", "Congelé")])).req().s("Sécurité et conservation").quand("nature", SANTE),
-            c("photosensible", "Craint la lumière", Booleen).s("Sécurité et conservation").quand("nature", MED),
+            c("derive_sang", "Médicament dérivé du sang", Booleen).s("Sécurité et conservation").quand("nature", MED).badge("MDS").aide("Impose le lot obligatoire à la réception et à la sortie.").x(),
+            c("cytotoxique", "Cytotoxique", Booleen).s("Sécurité et conservation").quand("nature", MED).badge("Cytotoxique").x(),
+            c("conservation", "Conservation", Choix(&[("ambiante", "Température ambiante"), ("refrigere", "Réfrigéré (2 à 8 °C)"), ("congele", "Congelé")])).req().s("Sécurité et conservation").quand("nature", SANTE).x(),
+            c("photosensible", "Craint la lumière", Booleen).s("Sécurité et conservation").quand("nature", MED).x(),
 
-            c("unite_achat", "Unité d'achat", Texte).s("Unités"),
-            c("unite_stock", "Unité de stock", Texte).req().s("Unités"),
-            c("unite_delivrance", "Unité de délivrance", Texte).s("Unités"),
-            c("coef_achat_stock", "Unités de stock par unité d'achat", Decimal).req().s("Unités"),
-            c("coef_stock_delivrance", "Unités de délivrance par unité de stock", Decimal).req().s("Unités"),
+            c("unite_achat", "Unité d'achat", Texte).s("Unités").x(),
+            c("unite_stock", "Unité de stock", Texte).req().s("Unités").x(),
+            c("unite_delivrance", "Unité de délivrance", Texte).s("Unités").x(),
+            c("coef_achat_stock", "Unités de stock par unité d'achat", Decimal).req().s("Unités").x(),
+            c("coef_stock_delivrance", "Unités de délivrance par unité de stock", Decimal).req().s("Unités").x(),
 
             c("lot_entree", "Lot à la réception", Choix(TRAC)).req().s("Traçabilité"),
             c("lot_sortie", "Lot à la sortie", Choix(TRAC)).req().s("Traçabilité"),
@@ -356,6 +375,20 @@ pub static ENTITES: &[Entite] = &[
         ],
     },
     Entite {
+        nom: "article_code_externe",
+        table: "article_code_externe",
+        libelle: "Code article d'une source",
+        pluriel: "Codes des sources externes",
+        groupe: "Articles",
+        etiquette: "(select a.code from article a where a.id = t.article_id) \
+                    || ' / ' || (select s.libelle from source_externe s where s.id = t.source_id) || ' ' || t.code_externe",
+        champs: &[
+            c("article_id", "Article", Ref("article")).req().l().p(1),
+            c("source_id", "Source", Ref("source_externe")).req().l(),
+            c("code_externe", "Code article de la source", Texte).req().l(),
+        ],
+    },
+    Entite {
         nom: "fournisseur",
         table: "fournisseur",
         libelle: "Fournisseur",
@@ -398,18 +431,38 @@ pub static ENTITES: &[Entite] = &[
         ],
     },
     Entite {
+        nom: "source_externe",
+        table: "source_externe",
+        libelle: "Source externe",
+        pluriel: "Sources externes",
+        groupe: "Achats",
+        etiquette: "t.code || ' – ' || t.libelle",
+        champs: &[
+            c("code", "Code", Texte).l().aide(CODE_AUTO),
+            c("libelle", "Libellé", Texte).req().l(),
+            c("type", "Type", Choix(&[("centrale", "Centrale d'achat"), ("referentiel_officiel", "Référentiel officiel"), ("fournisseur", "Fournisseur"), ("autre", "Autre")])).req().l().badge("*"),
+            c("fournisseur_id", "Fiche fournisseur", Ref("fournisseur")).l().aide("Facultatif : la centrale ou le fournisseur dans le fichier des fournisseurs."),
+            c("actif", "Actif", Booleen).l(),
+        ],
+    },
+    Entite {
         nom: "compteur",
         table: "compteur",
         libelle: "Compteur de codes",
         pluriel: "Compteurs de codes",
         groupe: "Paramètres",
-        etiquette: "t.entite || coalesce(nullif(' / ' || t.variante, ' / '), '') || ' : ' || t.prefixe || lpad(t.prochain::text, t.longueur, '0')",
+        etiquette: "t.entite || coalesce(nullif(' / ' || t.variante, ' / '), '') \
+                    || coalesce(' / ' || (select e.code from etablissement e where e.id = t.etablissement_id), '') \
+                    || coalesce(' / ' || (select r.code from referentiel r where r.id = t.referentiel_id), '') \
+                    || ' : ' || t.prefixe || lpad(t.prochain::text, t.longueur, '0')",
         champs: &[
-            c("entite", "Fichier", Choix(&[("article", "Articles"), ("fournisseur", "Fournisseurs"), ("famille", "Familles"), ("etablissement", "Établissements"), ("entite_juridique", "Entités juridiques"), ("pui", "PUI"), ("referentiel", "Référentiels"), ("pole", "Pôles"), ("service", "Services"), ("uf", "UF"), ("magasin", "Magasins"), ("emplacement", "Emplacements")])).req().l(),
+            c("entite", "Fichier", Choix(&[("article", "Articles"), ("fournisseur", "Fournisseurs"), ("famille", "Familles"), ("etablissement", "Établissements"), ("entite_juridique", "Entités juridiques"), ("pui", "PUI"), ("referentiel", "Référentiels"), ("pole", "Pôles"), ("service", "Services"), ("uf", "UF"), ("magasin", "Magasins"), ("emplacement", "Emplacements"), ("source_externe", "Sources externes")])).req().l(),
             c("variante", "Variante", Texte).l().aide("Nature (articles) ou type (magasins, fournisseurs…) concerné ; vide : toutes les fiches du fichier."),
             c("prefixe", "Préfixe", Texte).l(),
             c("longueur", "Nombre de chiffres", Entier).req().l(),
             c("prochain", "Prochain numéro", Entier).req().l(),
+            c("etablissement_id", "Pour l'établissement", Ref("etablissement")).l().aide("Facultatif : compteur propre à un établissement (UF, services, magasins…)."),
+            c("referentiel_id", "Pour le référentiel", Ref("referentiel")).l().aide("Facultatif : compteur propre à un référentiel (ex. : DMI d'un site)."),
             c("actif", "Actif", Booleen).l(),
         ],
     },
@@ -448,7 +501,7 @@ pub fn description() -> Value {
                            "requis": c.requis, "liste": c.liste, "aide": c.aide,
                            "section": if c.section.is_empty() { "Général" } else { c.section },
                            "quand": c.quand.map(|(col, v)| json!({"col": col, "valeurs": v})),
-                           "badge": c.badge, "parent": c.parent})
+                           "badge": c.badge, "parent": c.parent, "externe": c.externe})
                 })
                 .collect();
             json!({"nom": e.nom, "libelle": e.libelle, "pluriel": e.pluriel, "groupe": e.groupe, "champs": champs})

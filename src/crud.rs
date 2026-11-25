@@ -17,7 +17,7 @@ use tokio_postgres::types::ToSql;
 use crate::schema::{self, Entite, Genre};
 use crate::Etat;
 
-pub struct Erreur(StatusCode, String);
+pub struct Erreur(pub StatusCode, pub String);
 
 impl IntoResponse for Erreur {
     fn into_response(self) -> Response {
@@ -93,7 +93,7 @@ fn entite(nom: &str) -> Result<&'static Entite, Erreur> {
     schema::trouver(nom).ok_or_else(introuvable)
 }
 
-fn json_brut(texte: String, statut: StatusCode) -> Response {
+pub fn json_brut(texte: String, statut: StatusCode) -> Response {
     (statut, [(header::CONTENT_TYPE, "application/json; charset=utf-8")], texte).into_response()
 }
 
@@ -101,13 +101,18 @@ pub async fn schema_json() -> Json<Value> {
     Json(schema::description())
 }
 
-/// `GET /api/e/{entite}?q=texte&col=valeur…` : lignes triées par étiquette, 5 000 au plus.
+/// `GET /api/e/{entite}?q=texte&col=valeur&~col=valeur&limit=n&_utilisable_par=etab` : lignes triées par
+/// étiquette (5 000 au plus), avec l'étiquette de chaque lien affiché en colonne (`_l_<col>`).
+/// `~col` : la valeur, ou vide (ex. : familles d'un référentiel et familles communes).
+/// `_utilisable_par` (articles) : articles des référentiels qu'utilise l'établissement.
+/// En-tête `X-Total` : nombre de lignes sans la limite.
 pub async fn lister(
     State(etat): State<Arc<Etat>>,
     Path(nom): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Response, Erreur> {
     let e = entite(&nom)?;
+    let limite = params.get("limit").and_then(|s| s.parse::<i64>().ok()).unwrap_or(5000).clamp(1, 5000);
     let mut conds: Vec<String> = Vec::new();
     let mut vals: Vec<String> = Vec::new();
     if let Some(q) = params.get("q").filter(|q| !q.trim().is_empty()) {
@@ -126,25 +131,87 @@ pub async fn lister(
         ));
     }
     for (k, v) in &params {
-        if k == "q" {
+        if k == "_utilisable_par" && e.table == "article" {
+            vals.push(v.clone());
+            conds.push(format!("article_utilisable(t.id, ${}::text::bigint)", vals.len()));
             continue;
         }
-        if let Some(c) = e.champ(k) {
+        let (col, ou_vide) = match k.strip_prefix('~') {
+            Some(col) => (col, true),
+            None => (k.as_str(), false),
+        };
+        if let Some(c) = e.champ(col) {
             vals.push(v.clone());
-            conds.push(format!("t.{}::text = ${}", c.col, vals.len()));
+            conds.push(if ou_vide {
+                format!("(t.{0}::text = ${1} or t.{0} is null)", c.col, vals.len())
+            } else {
+                format!("t.{}::text = ${}", c.col, vals.len())
+            });
         }
     }
     let filtre = if conds.is_empty() { String::new() } else { format!("where {}", conds.join(" and ")) };
+    // Étiquettes des liens affichés en colonne : calculées ici, sans charger les fichiers liés.
+    let liens: String = e
+        .champs
+        .iter()
+        .filter_map(|c| match c.genre {
+            Genre::Ref(cible) if c.liste => schema::trouver(cible).map(|ce| {
+                format!(", (select {} from {} t where t.id = x.{}) as _l_{}", ce.etiquette, ce.table, c.col, c.col)
+            }),
+            _ => None,
+        })
+        .collect();
     let sql = format!(
-        "select coalesce(json_agg(x order by x._etiquette), '[]')::text from (
-            select t.*, {etiq} as _etiquette from {table} t {filtre} order by 2 limit 5000) x",
+        "select coalesce(json_agg(y order by y._etiquette), '[]')::text from (
+            select x.* {liens} from (
+                select t.*, {etiq} as _etiquette from {table} t {filtre} order by _etiquette limit {limite}) x) y",
         etiq = e.etiquette,
         table = e.table,
     );
+    let total_sql = format!("select count(*) from {} t {}", e.table, filtre);
     let c = etat.pool.get().await?;
     let p: Vec<&(dyn ToSql + Sync)> = vals.iter().map(|v| v as &(dyn ToSql + Sync)).collect();
     let texte: String = c.query_one(&sql, &p).await?.get(0);
-    Ok(json_brut(texte, StatusCode::OK))
+    let total: i64 = c.query_one(&total_sql, &p).await?.get(0);
+    let mut r = json_brut(texte, StatusCode::OK);
+    r.headers_mut().insert("x-total", total.into());
+    Ok(r)
+}
+
+/// `POST /api/etablissement/{id}/referencer` `{nature?, famille_id?, stock_mini?, stock_maxi?}` :
+/// crée les articles-sites manquants pour les articles actifs des référentiels de l'établissement.
+pub async fn referencer(
+    State(etat): State<Arc<Etat>>,
+    Path(id): Path<i64>,
+    Json(corps): Json<Value>,
+) -> Result<Response, Erreur> {
+    let texte = |k: &str| -> Option<String> {
+        match corps.get(k) {
+            Some(Value::String(s)) if !s.trim().is_empty() => Some(s.trim().to_string()),
+            Some(Value::Number(n)) => Some(n.to_string()),
+            _ => None,
+        }
+    };
+    let (nature, famille, mini, maxi) = (texte("nature"), texte("famille_id"), texte("stock_mini"), texte("stock_maxi"));
+    let mut c = etat.pool.get().await?;
+    let tx = c.transaction().await?;
+    tx.execute("select set_config('stocks.utilisateur', $1, true)", &[&"poste local"]).await?;
+    let n = tx
+        .execute(
+            "insert into article_site (article_id, etablissement_id, stock_mini, stock_maxi)
+             select a.id, $1, $2::text::numeric, $3::text::numeric
+             from article a
+             join etablissement_referentiel er
+               on er.referentiel_id = a.referentiel_id and er.nature = a.nature and er.etablissement_id = $1
+             where a.actif
+               and ($4::text is null or a.nature = $4)
+               and ($5::text is null or a.famille_id = $5::text::bigint)
+               and not exists (select 1 from article_site s where s.article_id = a.id and s.etablissement_id = $1)",
+            &[&id, &mini, &maxi, &nature, &famille],
+        )
+        .await?;
+    tx.commit().await?;
+    Ok(json_brut(json!({ "crees": n }).to_string(), StatusCode::OK))
 }
 
 /// `GET /api/e/{entite}/{id}` : une fiche, avec son étiquette.

@@ -99,6 +99,56 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .filtre select { width: auto; max-width: 240px; padding: 4px 6px; font-size: 13px; }
 .filtre.actif span { color: var(--accent); font-weight: 600; }
 .filtre.actif select { border-color: var(--accent); background: var(--accent-fond); }
+/* Sources externes : bouton au bout du champ, provenance, fenêtre de comparaison. */
+button.prendre {
+  margin-left: auto; padding: 0 6px; font-size: 11px; line-height: 18px;
+  color: var(--accent); background: var(--accent-fond); border-color: transparent;
+}
+button.prendre.vide { color: var(--fg-doux); background: transparent; border-color: var(--trait); }
+.provenance { font-size: 11px; color: var(--accent); margin-top: 2px; }
+
+.voile {
+  position: fixed; inset: 0; z-index: 10; background: rgba(31, 30, 28, .35);
+  display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto;
+}
+.fenetre {
+  background: var(--fond); border-radius: 10px; box-shadow: 0 8px 32px rgba(0, 0, 0, .2);
+  width: min(1100px, 100%); padding: 16px 20px;
+}
+.fenetre-tete { display: flex; align-items: center; gap: 8px; }
+.fenetre-tete h2 { margin: 0; font-size: 18px; }
+.fenetre h3 { font-size: 14px; margin: 18px 0 8px; }
+table.comparaison th, table.comparaison td { white-space: normal; vertical-align: top; }
+table.comparaison tbody th { font-weight: 600; color: var(--fg); background: var(--panneau); position: static; }
+table.comparaison tbody tr { cursor: default; }
+table.comparaison tbody tr:hover { background: none; }
+table.comparaison td.diff { background: #fff7e6; }
+table.comparaison td.pareil { color: var(--fg-doux); }
+table.comparaison td.absent { color: var(--fg-doux); text-align: center; }
+.cellule { display: flex; gap: 6px; align-items: flex-start; cursor: pointer; }
+button.tout { margin-top: 4px; padding: 2px 8px; font-size: 11px; }
+.lier { border: 1px solid var(--trait); border-radius: var(--rayon); padding: 8px 10px; margin-bottom: 8px; }
+.lier input { margin-top: 6px; }
+.resultat { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--trait); font-size: 13px; }
+.resultat:last-child { border-bottom: 0; }
+.resultat button { padding: 2px 10px; font-size: 12px; }
+.sous-titre-page { font-size: 15px; margin: 20px 0 8px; }
+td.exemples { color: var(--fg-doux); white-space: normal; font-size: 12px; }
+
+/* Champ de lien avec recherche à la frappe. */
+.combo { position: relative; }
+.combo-liste {
+  position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 2px); max-height: 320px; overflow-y: auto;
+  background: var(--fond); border: 1px solid var(--trait); border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, .12);
+}
+.combo-option { padding: 6px 10px; cursor: pointer; font-size: 13px; }
+.combo-option:hover, .combo-option.active { background: var(--accent-fond); }
+.combo-pied { padding: 6px 10px; font-size: 12px; color: var(--fg-doux); border-top: 1px solid var(--trait); }
+.filtre .combo { min-width: 220px; }
+.filtre .combo-texte { padding: 4px 6px; font-size: 13px; }
+.filtre.actif .combo-texte { border-color: var(--accent); background: var(--accent-fond); }
+.fenetre.petite { width: min(520px, 100%); }
+
 .plus { flex-basis: 100%; }
 .plus summary { cursor: pointer; font-size: 12px; color: var(--accent); margin: 2px 0 6px; }
 .plus .filtres { margin-bottom: 0; }
@@ -130,7 +180,7 @@ a.bouton {
 a.bouton:hover { background: var(--fond-doux); }
 
 .champ { margin-bottom: 10px; }
-.champ label { display: block; font-size: 12px; color: var(--fg-doux); margin-bottom: 3px; }
+.champ label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg-doux); margin-bottom: 3px; }
 .champ label .requis { color: var(--erreur); }
 .champ .aide { font-size: 12px; color: var(--fg-doux); margin-top: 2px; }
 .champ.case label { display: flex; gap: 6px; align-items: center; color: var(--fg); font-size: 14px; }
