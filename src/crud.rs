@@ -103,6 +103,15 @@ pub async fn schema_json() -> Json<Value> {
     Json(schema::description())
 }
 
+/// Liens déduits (ex. établissement d'un emplacement) : colonnes calculées à la lecture.
+fn colonnes_derivees(e: &Entite) -> String {
+    e.champs
+        .iter()
+        .filter(|c| !c.derive.is_empty())
+        .map(|c| format!(", ({}) as {}", c.derive, c.col))
+        .collect()
+}
+
 /// `GET /api/e/{entite}?q=texte&col=valeur&~col=valeur&limit=n&_utilisable_par=etab` : lignes triées par
 /// étiquette (5 000 au plus), avec l'étiquette de chaque lien affiché en colonne (`_l_<col>`).
 /// `~col` : la valeur, ou vide (ex. : familles d'un référentiel et familles communes).
@@ -133,6 +142,14 @@ pub async fn lister(
         ));
     }
     for (k, v) in &params {
+        if k == "_utilisable_magasin" && e.table == "article" {
+            vals.push(v.clone());
+            conds.push(format!(
+                "article_utilisable(t.id, (select m.etablissement_id from magasin m where m.id = ${}::text::bigint))",
+                vals.len()
+            ));
+            continue;
+        }
         if k == "_utilisable_par" && e.table == "article" {
             vals.push(v.clone());
             conds.push(format!("article_utilisable(t.id, ${}::text::bigint)", vals.len()));
@@ -144,6 +161,11 @@ pub async fn lister(
         };
         if let Some(c) = e.champ(col) {
             vals.push(v.clone());
+            // Lien déduit : filtré sur son expression.
+            if !c.derive.is_empty() {
+                conds.push(format!("({})::text = ${}", c.derive, vals.len()));
+                continue;
+            }
             conds.push(if ou_vide {
                 format!("(t.{0}::text = ${1} or t.{0} is null)", c.col, vals.len())
             } else {
@@ -163,10 +185,11 @@ pub async fn lister(
             _ => None,
         })
         .collect();
+    let derives = colonnes_derivees(e);
     let sql = format!(
         "select coalesce(json_agg(y order by y._etiquette), '[]')::text from (
             select x.* {liens} from (
-                select t.*, {etiq} as _etiquette from {table} t {filtre} order by _etiquette limit {limite}) x) y",
+                select t.*, {etiq} as _etiquette {derives} from {table} t {filtre} order by _etiquette limit {limite}) x) y",
         etiq = e.etiquette,
         table = e.table,
     );
@@ -223,9 +246,10 @@ pub async fn lire(
 ) -> Result<Response, Erreur> {
     let e = entite(&nom)?;
     let sql = format!(
-        "select row_to_json(x)::text from (select t.*, {etiq} as _etiquette from {table} t where t.id = $1) x",
+        "select row_to_json(x)::text from (select t.*, {etiq} as _etiquette {derives} from {table} t where t.id = $1) x",
         etiq = e.etiquette,
         table = e.table,
+        derives = colonnes_derivees(e),
     );
     let c = etat.pool.get().await?;
     let ligne = c.query_opt(&sql, &[&id]).await?.ok_or_else(introuvable)?;
@@ -240,7 +264,7 @@ fn nettoyer(e: &Entite, corps: Value) -> Result<Map<String, Value>, Erreur> {
     let mut out = Map::new();
     for (k, v) in obj {
         // Le code vient toujours du compteur et ne se modifie pas : jamais lu dans le corps.
-        if k == "code" {
+        if k == "code" || e.champ(&k).is_some_and(|c| c.calcule) {
             continue;
         }
         if e.champ(&k).is_some() {
@@ -279,6 +303,9 @@ pub async fn creer(
     Json(corps): Json<Value>,
 ) -> Result<Response, Erreur> {
     let e = entite(&nom)?;
+    if schema::mode(e.nom) == "lecture" {
+        return Err(Erreur(StatusCode::METHOD_NOT_ALLOWED, "Ce fichier est calculé : il ne se saisit pas".into()));
+    }
     // Un champ laissé vide à la création prend la valeur par défaut de la base.
     let mut corps = nettoyer(e, corps)?;
     corps.retain(|_, v| !v.is_null());
@@ -304,6 +331,9 @@ pub async fn modifier(
     Json(corps): Json<Value>,
 ) -> Result<Response, Erreur> {
     let e = entite(&nom)?;
+    if schema::mode(e.nom) != "normal" {
+        return Err(Erreur(StatusCode::METHOD_NOT_ALLOWED, "Ces fiches ne se modifient pas".into()));
+    }
     let corps = nettoyer(e, corps)?;
     let cols: Vec<&str> = corps.keys().map(|k| k.as_str()).collect();
     let sql = format!(
@@ -323,6 +353,9 @@ pub async fn supprimer(
     Path((nom, id)): Path<(String, i64)>,
 ) -> Result<StatusCode, Erreur> {
     let e = entite(&nom)?;
+    if schema::mode(e.nom) != "normal" {
+        return Err(Erreur(StatusCode::METHOD_NOT_ALLOWED, "Ces fiches ne se suppriment pas".into()));
+    }
     let mut c = etat.pool.get().await?;
     let tx = c.transaction().await?;
     tx.execute("select set_config('stocks.utilisateur', $1, true)", &[&"poste local"]).await?;

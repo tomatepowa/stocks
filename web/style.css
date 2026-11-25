@@ -1,14 +1,15 @@
 /* Thème clair uniquement. Une seule échelle d'espacements, de rayons et de tailles de texte. */
 :root {
-  --fg: #1f1e1c;
-  --fg-doux: #6b6862;
-  --fg-pale: #9a968e;
+  --fg: #1a1917;
+  --fg-doux: #615e57;
+  --fg-pale: #8f8b82;
   --fond: #ffffff;
-  --fond-doux: #f4f2ee;
-  --panneau: #faf9f7;
-  --champ: #f7f6f3;
-  --trait: #e3e0da;
-  --trait-fort: #cfcbc3;
+  --fond-page: #f1eee8;
+  --fond-doux: #ebe8e1;
+  --panneau: #e9e5dd;
+  --champ: #ffffff;
+  --trait: #dcd7ce;
+  --trait-fort: #c2bcb1;
   --accent: #2b5f8a;
   --accent-fonce: #234f73;
   --accent-fond: #e8f0f7;
@@ -29,7 +30,7 @@
 
 html { color-scheme: light; }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--fond); color: var(--fg); font: 14px/1.45 var(--police); }
+body { margin: 0; background: var(--fond-page); color: var(--fg); font: 14px/1.45 var(--police); }
 a { color: var(--accent); }
 [hidden] { display: none !important; }
 
@@ -83,7 +84,7 @@ body:not(.mode-fiche) #navigation { display: none; }
 
 #navigation {
   position: sticky; top: var(--barre-h); height: calc(100vh - var(--barre-h));
-  display: flex; flex-direction: column; border-right: 1px solid var(--trait); background: var(--fond); min-width: 0;
+  display: flex; flex-direction: column; border-right: 1px solid var(--trait); background: #f7f5f1; min-width: 0;
 }
 .nav-tete { padding: 10px 10px 8px; border-bottom: 1px solid var(--trait); display: grid; gap: 6px; }
 .nav-titre { display: flex; align-items: center; gap: 6px; }
@@ -96,7 +97,7 @@ body:not(.mode-fiche) #navigation { display: none; }
   border-left: 3px solid transparent;
 }
 .nav-item:hover { background: var(--fond-doux); }
-.nav-item.actif { background: var(--accent-fond); border-left-color: var(--accent); }
+.nav-item.actif { background: #fff; border-left-color: var(--accent); box-shadow: 0 1px 2px rgba(31, 30, 28, .08); }
 .nav-item.inactif { color: var(--fg-pale); }
 .nav-code { display: block; font: 600 11px/1.3 var(--mono); color: var(--fg-doux); }
 .nav-item.actif .nav-code { color: var(--accent); }
@@ -166,18 +167,19 @@ button.filtres-bouton.actif { border-color: var(--accent); color: var(--accent);
 .filtre.actif > span { color: var(--accent); font-weight: 600; }
 .filtre.actif select, .filtre.actif .combo-texte { border-color: var(--accent); background: var(--accent-fond); }
 
-.tableau { border: 1px solid var(--trait); border-radius: var(--rayon); overflow-x: auto; }
+.tableau { border: 1px solid var(--trait); border-radius: var(--rayon); overflow-x: auto; background: var(--fond); }
 .tableau.principal { overflow: visible; }
 table { border-collapse: separate; border-spacing: 0; width: 100%; }
 th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--trait); white-space: nowrap; }
 th {
-  background: var(--panneau); font-weight: 600; font-size: 12px; color: var(--fg-doux);
+  background: #f3f0ea; font-weight: 600; font-size: 12px; color: var(--fg-doux);
 }
 .tableau.principal th { position: sticky; top: var(--barre-h); z-index: 2; }
 .tableau.principal thead tr:first-child th:first-child { border-top-left-radius: var(--rayon); }
 .tableau.principal thead tr:first-child th:last-child { border-top-right-radius: var(--rayon); }
 tbody tr { cursor: pointer; }
-tbody tr:hover td { background: var(--fond-doux); }
+td { color: var(--fg); }
+tbody tr:hover td { background: #f6f3ed; }
 tbody tr:last-child td { border-bottom: 0; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
 td.code { font: 600 12px var(--mono); color: var(--fg-doux); }
@@ -188,7 +190,7 @@ th.triable:hover { color: var(--fg); }
 /* ------------------------------------------------------------------ Fiche */
 
 .tete {
-  position: sticky; top: var(--barre-h); z-index: 5; background: var(--fond);
+  position: sticky; top: var(--barre-h); z-index: 5; background: var(--fond-page);
   margin: -16px -24px 16px; padding: 10px 24px 0; border-bottom: 1px solid var(--trait);
 }
 .fil { font-size: 12px; color: var(--fg-doux); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -220,7 +222,7 @@ body.nav-repliee #montrer-nav { display: inline-flex; }
 .puces:empty { display: none; }
 .puce {
   font-size: 12px; padding: 2px 8px; border: 1px solid var(--trait); border-radius: var(--rayon-petit);
-  color: var(--fg); text-decoration: none; background: var(--panneau);
+  color: var(--fg); text-decoration: none; background: var(--fond);
 }
 .puce span { color: var(--fg-doux); }
 .puce:hover { border-color: var(--accent); }
@@ -255,8 +257,10 @@ body.nav-repliee #montrer-nav { display: inline-flex; }
 .carte {
   break-inside: avoid; margin: 0 0 16px; min-width: 0;
   border: 1px solid var(--trait); border-radius: var(--rayon); background: var(--fond); padding: 4px 14px 6px;
+  box-shadow: 0 1px 2px rgba(31, 30, 28, .05);
 }
-.carte legend { font-weight: 600; font-size: 13px; padding: 0 6px; margin-left: -6px; }
+.carte legend { font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-doux);
+  padding: 2px 8px; margin-left: -8px; background: var(--fond); border-radius: 4px; }
 
 .champ { margin: 8px 0 10px; }
 .champ label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg-doux); margin-bottom: 3px; }
@@ -269,17 +273,46 @@ body.nav-repliee #montrer-nav { display: inline-flex; }
 .champ.case input { width: 16px; height: 16px; accent-color: var(--accent); }
 /* Champs légers : la valeur d'abord, le cadre au survol et au focus. */
 .carte input[type=text], .carte input[type=number], .carte input[type=date], .carte select, .carte textarea {
-  background: var(--champ); border-color: transparent;
+  background: var(--champ); border-color: transparent; border-bottom-color: var(--trait); border-radius: 4px 4px 0 0;
+  font-weight: 500; color: var(--fg);
 }
-.carte input:hover, .carte select:hover, .carte textarea:hover { border-color: var(--trait); }
+.carte input:hover, .carte select:hover, .carte textarea:hover { border-color: var(--trait-fort); border-radius: 4px; }
 .carte input:focus, .carte select:focus, .carte textarea:focus { background: var(--fond); border-color: var(--accent); }
 .champ.large textarea { resize: vertical; }
+/* Liens déduits et filiation : en grisé, mais cliquables. */
+.champ.derive label { color: var(--fg-pale); }
+.valeur-derivee {
+  display: block; padding: 6px 9px; min-height: 32px; border-radius: 4px; background: var(--fond-doux);
+  color: var(--fg-doux); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+a.valeur-derivee:hover { color: var(--accent); background: var(--accent-fond); }
+.valeur-derivee.vide { font-style: italic; color: var(--fg-pale); }
+.carte.filiation { background: var(--fond-page); border-style: dashed; box-shadow: none; }
+.carte.filiation legend { background: var(--fond-page); }
+.carte input:disabled, .carte select:disabled, .carte textarea:disabled { background: transparent; color: var(--fg); opacity: 1; border-bottom-color: transparent; }
 .carte input.fige, .carte input.fige:hover, .carte input.fige:focus {
   background: transparent; border-color: transparent; box-shadow: none; padding-left: 0;
   font: 600 13px var(--mono); color: var(--fg-doux); cursor: default;
 }
+/* Impacts d'une modification en cours. */
+.impacts {
+  border: 1px solid #e6cf9c; border-left: 4px solid #d39a2c; border-radius: var(--rayon);
+  background: var(--attention-fond); color: #5d4210; padding: 8px 12px; margin-bottom: 16px; font-size: 13px;
+}
+.impacts.fort { border-color: #e2b1ab; border-left-color: var(--alerte); background: var(--alerte-fond); color: #6e211b; }
+.impacts ul { margin: 6px 0 0; padding-left: 18px; }
+.impacts li { margin: 2px 0; }
+.impacts a { color: inherit; }
+.impact-fichier { font-weight: 600; margin-right: 4px; }
+.impact-fichier::after { content: " :"; }
+button.lien-nombre {
+  height: auto; padding: 0 6px; border: 0; border-radius: 999px; background: rgba(0, 0, 0, .07);
+  color: inherit; font-weight: 700; text-decoration: underline;
+}
+button.lien-nombre:hover { background: rgba(0, 0, 0, .14); }
+
 /* Prix déjà connus (fiche prix fournisseur). */
-.prix-connus { border: 1px solid var(--trait); border-radius: var(--rayon); background: var(--panneau); padding: 10px 12px; margin-bottom: 16px; }
+.prix-connus { border: 1px solid var(--trait); border-radius: var(--rayon); background: var(--fond); padding: 10px 12px; margin-bottom: 16px; }
 .prix-connus-tete { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; margin-bottom: 8px; }
 .prix-connus .message { margin-bottom: 8px; }
 .prix-connus table { background: var(--fond); border: 1px solid var(--trait); border-radius: var(--rayon-petit); }

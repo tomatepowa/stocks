@@ -135,8 +135,21 @@ function contexteFormulaire(form, c) {
     if (!el || el.value === "" || tc.col === c.col) continue;
     p[(tc.requis ? "" : "~") + tc.col] = el.value;
   }
+  // Même suffixe : l'emplacement « de départ » est pris dans le magasin « de départ ».
+  const suffixe = c.col.startsWith(c.extra) ? c.col.slice(c.extra.length) : "";
+  if (suffixe && suffixe !== "_id") {
+    for (const tc of cible.champs) {
+      if (tc.genre !== "ref") continue;
+      const el = form.elements[tc.extra + suffixe];
+      if (el && el.value) p[tc.col] = el.value;
+    }
+  }
   if (c.extra === "article" && form.elements.etablissement_id && form.elements.etablissement_id.value) {
     p._utilisable_par = form.elements.etablissement_id.value;
+  }
+  if (c.extra === "article") {
+    const magasin = ["magasin_id", "magasin_source_id", "magasin_destination_id"].map((k) => form.elements[k]).find((el) => el && el.value);
+    if (magasin) p._utilisable_magasin = magasin.value;
   }
   if (cible.champs.some((x) => x.col === "actif")) p.actif = "true";
   return p;
@@ -150,6 +163,7 @@ function afficher(c, v, liees) {
     case "choix": { const o = c.extra.find(([k]) => k === v); return o ? o[1] : v; }
     case "decimal": case "entier": return nf.format(Number(v));
     case "date": return new Date(v + "T00:00:00").toLocaleDateString("fr-FR");
+    case "horodatage": return new Date(v).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
     default: return v;
   }
 }
@@ -323,7 +337,7 @@ async function pageListe() {
       <button type="button" id="bouton-filtres" class="filtres-bouton">Filtres</button>
       <span class="compte" id="compte"></span>
       <span class="espace"></span>
-      <button type="button" class="principal" id="nouveau">Nouveau</button>
+      ${e.mode === "lecture" ? `<span class="compte">Calculé par la base</span>` : `<button type="button" class="principal" id="nouveau">Nouveau</button>`}
     </div>
     <div class="puces-filtres" id="puces-filtres"></div>
     <div class="panneau-filtres" id="panneau-filtres"${m.panneau ? "" : " hidden"}>${await filtresHtml(e, m)}</div>
@@ -346,7 +360,7 @@ async function pageListe() {
     const col = div.closest(".filtre").dataset.filtreCol;
     activerCombo(div, () => ({}), (valeur) => appliquerFiltre(col, valeur, div));
   }
-  $("#nouveau").addEventListener("click", () => {
+  if ($("#nouveau")) $("#nouveau").addEventListener("click", () => {
     const p = new URLSearchParams(m.filtres).toString();
     location.hash = `#${e.nom}/nouveau${p ? "?" + p : ""}`;
   });
@@ -504,6 +518,7 @@ async function pageFiche(id, valeursInitiales = {}) {
   }
   etat.fiche = ligne;
   const nouveau = !ligne;
+  etat.lectureSeule = e.mode === "lecture" || (e.mode === "ajout" && !nouveau);
   dessinerNavigation();
 
   // Champs regroupés par section, dans l'ordre de la description.
@@ -542,8 +557,9 @@ async function pageFiche(id, valeursInitiales = {}) {
           <span id="position"></span>
           <button type="button" class="discret icone" id="suivant" title="Fiche suivante (Alt+↓)">›</button></div>`}
         ${extra}
-        <button type="submit" form="formulaire" class="principal" title="Enregistrer (Ctrl+S)">Enregistrer</button>
-        ${nouveau ? "" : `<details class="plus-actions"><summary title="Autres actions">⋯</summary>
+        ${etat.lectureSeule ? `<span class="compte">${e.mode === "lecture" ? "Calculé par la base" : "Mouvement enregistré : il ne se modifie pas"}</span>`
+          : `<button type="submit" form="formulaire" class="principal" title="Enregistrer (Ctrl+S)">Enregistrer</button>`}
+        ${nouveau || etat.lectureSeule ? "" : `<details class="plus-actions"><summary title="Autres actions">⋯</summary>
           <div class="menu-actions"><button type="button" class="danger" id="supprimer">Supprimer la fiche…</button></div></details>`}
         </div>
       </div>
@@ -551,6 +567,7 @@ async function pageFiche(id, valeursInitiales = {}) {
       ${nouveau ? "" : `<nav class="onglets" id="onglets"><button type="button" data-onglet="fiche" class="actif">Fiche</button></nav>`}
       <div id="message"></div>
     </div>
+    <div id="impacts" class="impacts" hidden></div>
     ${e.nom === "article_fournisseur" ? `<div id="prix-connus" class="prix-connus" hidden></div>` : ""}
     <form id="formulaire" class="sections" novalidate>${cartes}</form>
     <div id="vue-onglet" hidden></div>`;
@@ -558,7 +575,7 @@ async function pageFiche(id, valeursInitiales = {}) {
   const form = $("#formulaire");
   form.addEventListener("submit", enregistrer);
   etat.modifie = false;
-  const modifie = () => { etat.modifie = true; $("#etat-saisie").hidden = false; };
+  const modifie = () => { etat.modifie = true; $("#etat-saisie").hidden = false; afficherImpacts(); };
   form.addEventListener("input", modifie);
   form.addEventListener("change", (ev) => {
     modifie();
@@ -570,12 +587,21 @@ async function pageFiche(id, valeursInitiales = {}) {
     }
   });
   if (e.nom === "article_fournisseur") afficherPrixConnus();
+  if (e.nom === "mouvement" && nouveau) {
+    form.addEventListener("change", (ev) => {
+      if (["type", "article_id", "magasin_source_id", "magasin_destination_id"].includes(ev.target.name)) aideMouvement();
+    });
+    aideMouvement();
+  }
   for (const div of $$(".combo", form)) {
     const c = e.champs.find((x) => x.col === div.dataset.col);
     activerCombo(div, () => contexteFormulaire(form, c));
   }
+  if (etat.lectureSeule) {
+    for (const el of $$("input, select, textarea", form)) { el.disabled = true; }
+  }
+  if (!nouveau && $("#supprimer")) $("#supprimer").addEventListener("click", supprimer);
   if (!nouveau) {
-    $("#supprimer").addEventListener("click", supprimer);
     $("#precedent").addEventListener("click", () => allerVoisin(-1));
     $("#suivant").addEventListener("click", () => allerVoisin(1));
     $("#montrer-nav").addEventListener("click", () => { document.body.classList.remove("nav-repliee"); prefs.ecrire("navRepliee", false); });
@@ -919,6 +945,16 @@ async function dessinerRattachement() {
   }
   $("#fil").innerHTML = fil;
 
+  // Carte « Filiation » : la chaîne complète, du plus haut au parent direct, en tête de la fiche.
+  let carte = $("#carte-filiation");
+  if (!carte) {
+    form.insertAdjacentHTML("afterbegin", `<fieldset class="carte filiation" id="carte-filiation"><legend>Filiation</legend><div></div></fieldset>`);
+    carte = $("#carte-filiation");
+  }
+  carte.hidden = !chaine.length;
+  $("div", carte).innerHTML = chaine.map(({ entite, fiche }) => `<div class="champ derive"><label>${esc(entite.libelle)}</label>
+    <a class="valeur-derivee" href="#${entite.nom}/${fiche.id}">${esc(fiche._etiquette)}</a></div>`).join("");
+
   let puces = "";
   for (const c of e.champs) {
     // Lien vers le même fichier (ex. : magasin d'approvisionnement) : toujours montré.
@@ -939,6 +975,18 @@ async function champHtml(c, v, nouveau) {
     return `<div class="champ case" data-col="${c.col}"><label><input type="checkbox" name="${c.col}" ${v ? "checked" : ""}> ${esc(c.libelle)}${info}</label></div>`;
   }
   let input;
+  if (c.derive) {
+    // Lien déduit (ex. établissement d'un emplacement) : en grisé, cliquable, jamais saisi.
+    const lib = v ? await etiquette(c.extra, v) : "";
+    return `<div class="champ derive" data-col="${c.col}"><label>${esc(c.libelle)}${info}</label>
+      ${v ? `<a class="valeur-derivee" href="#${c.extra}/${v}">${esc(lib)}</a>` : `<span class="valeur-derivee vide">${nouveau ? "Déduit à l'enregistrement" : "—"}</span>`}</div>`;
+  }
+  if (c.calcule || c.genre === "horodatage") {
+    const texte = c.genre === "horodatage" ? afficher(c, v) : (v ?? "");
+    input = `<input id="${id}" type="text" class="fige" readonly tabindex="-1" value="${esc(texte)}"
+      placeholder="${nouveau ? "Calculé à l'enregistrement" : ""}">`;
+    return `<div class="champ" data-col="${c.col}"><label for="${id}">${esc(c.libelle)}${info}</label>${input}</div>`;
+  }
   if (c.genre === "ref") {
     input = await comboHtml(c.col, c.extra, v, { id, placeholder: c.requis ? "Rechercher…" : "Aucun (rechercher pour choisir)" });
   } else if (c.genre === "choix") {
@@ -1109,6 +1157,101 @@ async function afficherPrixConnus() {
   lierLignes(zone, "article_fournisseur");
 }
 
+// ------------------------------------------------------------------ Mouvement : stock disponible et emplacement proposé
+
+/** Donne une valeur à un champ de lien (texte affiché et valeur cachée). */
+function remplirCombo(col, id, libelle) {
+  const div = $(`#formulaire .combo[data-col="${col}"]`);
+  if (!div) return;
+  $("input[type=hidden]", div).value = id ?? "";
+  $(".combo-texte", div).value = libelle ?? "";
+  if (id) cacheEtiquettes.set(`${div.dataset.cible}/${id}`, libelle);
+}
+
+/** Nouveau mouvement. Avec un départ : stock disponible de l'article dans ce magasin, du premier au
+ *  dernier périmé, avec « Prendre ce lot » (emplacement, lot, série, péremption). Avec une arrivée :
+ *  emplacement principal de l'article dans ce magasin, proposé s'il n'est pas déjà choisi. */
+async function aideMouvement() {
+  const form = $("#formulaire");
+  let zone = $("#aide-mouvement");
+  if (!zone) {
+    form.insertAdjacentHTML("beforebegin", `<div id="aide-mouvement" class="prix-connus" hidden></div>`);
+    zone = $("#aide-mouvement");
+  }
+  const article = form.elements.article_id.value;
+  const visible = (col) => { const d = $(`.champ[data-col="${col}"]`, form); return d && !d.hidden; };
+  const source = visible("magasin_source_id") ? form.elements.magasin_source_id.value : "";
+  const destination = visible("magasin_destination_id") ? form.elements.magasin_destination_id.value : "";
+
+  // Emplacement proposé à l'arrivée.
+  if (article && destination && !form.elements.emplacement_destination_id.value) {
+    const am = (await api(`/api/e/article_magasin?article_id=${article}&magasin_id=${destination}&limit=1`))[0];
+    if (am && am.emplacement_principal_id) {
+      remplirCombo("emplacement_destination_id", am.emplacement_principal_id, await etiquette("emplacement", am.emplacement_principal_id));
+    }
+  }
+  if (!article || !source) { zone.hidden = true; return; }
+  const lignes = (await api(`/api/e/stock?article_id=${article}&magasin_id=${source}&limit=200`))
+    .sort((a, b) => (a.peremption || "9999").localeCompare(b.peremption || "9999"));
+  const total = lignes.reduce((n, l) => n + Number(l.quantite), 0);
+  zone.hidden = false;
+  zone.innerHTML = `
+    <div class="prix-connus-tete"><strong>Stock disponible dans ce magasin</strong>
+      <span class="compte">${lignes.length ? `${nf.format(total)} en ${lignes.length} ligne${lignes.length > 1 ? "s" : ""}, du premier au dernier périmé` : "aucun stock"}</span></div>
+    ${lignes.length ? `<table><thead><tr><th>Emplacement</th><th>Lot</th><th>N° de série</th><th>Péremption</th><th class="num">Quantité</th><th></th></tr></thead><tbody>
+      ${lignes.map((l, i) => `<tr><td>${esc(l._l_emplacement_id || "—")}</td><td>${esc(l.lot || "")}</td><td>${esc(l.numero_serie || "")}</td>
+        <td>${l.peremption ? afficher({ genre: "date" }, l.peremption) : ""}</td><td class="num">${nf.format(Number(l.quantite))}</td>
+        <td><button type="button" class="petit" data-prendre="${i}">Prendre ce lot</button></td></tr>`).join("")}
+      </tbody></table>` : `<p class="vide">Rien à prélever : choisissez un autre magasin, ou faites d'abord une entrée.</p>`}`;
+  for (const b of $$("[data-prendre]", zone)) {
+    b.addEventListener("click", async () => {
+      const l = lignes[Number(b.dataset.prendre)];
+      remplirCombo("emplacement_source_id", l.emplacement_id, l._l_emplacement_id || "");
+      form.elements.lot.value = l.lot || "";
+      form.elements.numero_serie.value = l.numero_serie || "";
+      form.elements.peremption.value = l.peremption || "";
+      if (!form.elements.quantite.value) form.elements.quantite.value = l.quantite;
+      form.elements.quantite.max = l.quantite;
+      form.dispatchEvent(new Event("input"));
+      $("#f-quantite").focus();
+    });
+  }
+}
+
+// ------------------------------------------------------------------ Impacts d'une modification en cours
+
+const IMPACTS_DETAILLES = 3;  // au-delà, on affiche le nombre (cliquable) plutôt que chaque fiche
+
+/** Fiche existante en cours de modification : les fiches qui en dépendent (tous fichiers confondus).
+ *  Peu nombreuses : chacune, avec un lien ; sinon leur nombre, qui ouvre l'onglet où elles sont toutes.
+ *  Désactiver la fiche : message plus appuyé. */
+function afficherImpacts() {
+  const zone = $("#impacts");
+  if (!zone || !etat.fiche || !etat.modifie) { if (zone) zone.hidden = true; return; }
+  const blocs = (etat.blocs || []).filter((b) => b.total > 0);
+  if (!blocs.length) { zone.hidden = true; return; }
+  const form = $("#formulaire");
+  const desactive = form.elements.actif && etat.fiche.actif && !form.elements.actif.checked;
+  const total = blocs.reduce((n, b) => n + b.total, 0);
+  const parBloc = blocs.map((b) => {
+    if (b.total <= IMPACTS_DETAILLES) {
+      const liens = b.lignes.slice(0, IMPACTS_DETAILLES)
+        .map((l) => `<a href="#${b.autre.nom}/${l.id}">${esc(l._etiquette)}</a>`).join(", ");
+      return `<li><span class="impact-fichier">${esc(b.titre)}</span> ${liens}</li>`;
+    }
+    return `<li><span class="impact-fichier">${esc(b.titre)}</span>
+      <button type="button" class="lien-nombre" data-onglet-impact="${b.cle}">${nf.format(b.total)} fiches</button></li>`;
+  }).join("");
+  zone.hidden = false;
+  zone.classList.toggle("fort", !!desactive);
+  zone.innerHTML = `
+    <div class="impacts-tete">${desactive
+      ? `<strong>Désactiver cette fiche</strong> concerne ${nf.format(total)} fiche${total > 1 ? "s" : ""} qui en dépendent :`
+      : `<strong>Modification en cours.</strong> ${nf.format(total)} fiche${total > 1 ? "s" : ""} dépendent de celle-ci et seront concernées :`}</div>
+    <ul>${parBloc}</ul>`;
+  for (const b of $$("[data-onglet-impact]", zone)) b.addEventListener("click", () => afficherOnglet(b.dataset.ongletImpact));
+}
+
 // ------------------------------------------------------------------ Onglets : fiches liées et historique
 
 /** Un onglet par fichier rattaché à cette fiche (ex. : articles-sites et prix d'un article), avec
@@ -1135,6 +1278,7 @@ async function chargerOnglets(ligne) {
     + etat.blocs.map((b) => `<button type="button" data-onglet="${b.cle}">${esc(b.titre)} <span class="nombre">${nf.format(b.total)}</span></button>`).join("")
     + `<button type="button" data-onglet="historique">Historique</button>`;
   for (const b of $$("button", onglets)) b.addEventListener("click", () => afficherOnglet(b.dataset.onglet));
+  afficherImpacts();
   const voulu = (etat.onglet || {})[e.nom];
   afficherOnglet(voulu && $(`[data-onglet="${voulu}"]`, onglets) ? voulu : "fiche");
 }
@@ -1145,6 +1289,8 @@ async function afficherOnglet(cle) {
   for (const b of $$("#onglets button")) b.classList.toggle("actif", b.dataset.onglet === cle);
   const vue = $("#vue-onglet");
   $("#formulaire").hidden = cle !== "fiche";
+  for (const id of ["#impacts", "#prix-connus"]) { const z = $(id); if (z && cle !== "fiche") z.hidden = true; }
+  if (cle === "fiche") afficherImpacts();
   vue.hidden = cle === "fiche";
   if (cle === "fiche") return;
   if (cle === "historique") { await historique(vue); return; }

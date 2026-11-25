@@ -10,6 +10,8 @@ pub enum Genre {
     Decimal,
     Booleen,
     Date,
+    /// Date et heure (lecture seule).
+    Horodatage,
     Choix(&'static [(&'static str, &'static str)]),
     /// Clé étrangère vers une autre entité (par son nom).
     Ref(&'static str),
@@ -34,10 +36,15 @@ pub struct Champ {
     pub parent: u8,
     /// Champ d'article qu'une source externe (centrale…) peut renseigner.
     pub externe: bool,
+    /// Valeur calculée par la base (date, auteur, valorisation) : affichée, jamais envoyée.
+    pub calcule: bool,
+    /// Lien déduit (expression SQL, alias `t`) : ex. l'établissement d'un emplacement, par son magasin.
+    /// Affiché en grisé, montré dans les listes, filtrable ; jamais saisi.
+    pub derive: &'static str,
 }
 
 const fn c(col: &'static str, libelle: &'static str, genre: Genre) -> Champ {
-    Champ { col, libelle, genre, requis: false, liste: false, aide: "", section: "", quand: None, badge: "", parent: 0, externe: false }
+    Champ { col, libelle, genre, requis: false, liste: false, aide: "", section: "", quand: None, badge: "", parent: 0, externe: false, calcule: false, derive: "" }
 }
 
 impl Champ {
@@ -71,6 +78,15 @@ impl Champ {
     }
     const fn x(mut self) -> Self {
         self.externe = true;
+        self
+    }
+    const fn calc(mut self) -> Self {
+        self.calcule = true;
+        self
+    }
+    const fn derive(mut self, sql: &'static str) -> Self {
+        self.derive = sql;
+        self.calcule = true;
         self
     }
 }
@@ -126,7 +142,7 @@ pub static ENTITES: &[Entite] = &[
             c("code", "Code", Texte).l().aide(CODE_AUTO),
             c("libelle", "Libellé", Texte).req().l(),
             c("pharmacien_gerant", "Pharmacien gérant", Texte).l(),
-            c("etablissement_siege_id", "Établissement siège", Ref("etablissement")).l().aide("Établissement titulaire de l'autorisation, où la PUI est implantée ; il doit être desservi par la PUI."),
+            c("etablissement_siege_id", "Établissement siège", Ref("etablissement")).l().p(1).aide("Établissement titulaire de l'autorisation, où la PUI est implantée ; il doit être desservi par la PUI."),
             c("cadre", "Cadre", Choix(&[("propre", "PUI de l'établissement"), ("multi_sites", "Multi-sites (même entité juridique)"), ("convention", "Desserte d'autres entités par convention"), ("gcs", "PUI de GCS")])).req().l().badge("*"),
             c("actif", "Actif", Booleen).l(),
         ],
@@ -224,6 +240,7 @@ pub static ENTITES: &[Entite] = &[
         champs: &[
             c("etablissement_id", "Établissement", Ref("etablissement")).req().l().s("Rattachement"),
             c("service_id", "Service", Ref("service")).req().l().s("Rattachement").p(1),
+            c("pole_id", "Pôle", Ref("pole")).s("Rattachement").derive("(select s.pole_id from service s where s.id = t.service_id)"),
             c("code", "Code UF", Texte).l().aide(CODE_AUTO).s("Identification"),
             c("libelle", "Libellé", Texte).req().l().s("Identification"),
             c("activite", "Activité", Choix(ACTIVITES)).req().l().s("Identification").badge("*"),
@@ -259,9 +276,11 @@ pub static ENTITES: &[Entite] = &[
         libelle: "Emplacement",
         pluriel: "Emplacements",
         groupe: "Structure",
-        etiquette: "t.code || coalesce(' – ' || t.libelle, '')",
+        etiquette: "t.code || coalesce(' – ' || t.libelle, '') || ' · ' || (select m.code from magasin m where m.id = t.magasin_id)",
         champs: &[
             c("magasin_id", "Magasin", Ref("magasin")).req().l().p(1),
+            c("etablissement_id", "Établissement", Ref("etablissement")).l().derive("(select m.etablissement_id from magasin m where m.id = t.magasin_id)"),
+            c("pui_id", "PUI", Ref("pui")).derive("(select m.pui_id from magasin m where m.id = t.magasin_id)"),
             c("code", "Code", Texte).l().aide(CODE_AUTO),
             c("libelle", "Libellé", Texte).l(),
             c("actif", "Actif", Booleen),
@@ -353,6 +372,7 @@ pub static ENTITES: &[Entite] = &[
         champs: &[
             c("article_id", "Article", Ref("article")).req().l().s("Rattachement").p(1),
             c("etablissement_id", "Établissement", Ref("etablissement")).req().l().s("Rattachement"),
+            c("referentiel_id", "Référentiel", Ref("referentiel")).s("Rattachement").derive("(select a.referentiel_id from article a where a.id = t.article_id)"),
             c("code_local", "Code local", Texte).l().s("Rattachement"),
             c("actif", "Actif", Booleen).s("Rattachement"),
             c("stock_mini", "Stock mini", Decimal).l().s("Seuils"),
@@ -377,6 +397,7 @@ pub static ENTITES: &[Entite] = &[
         champs: &[
             c("article_id", "Article", Ref("article")).req().l().p(1),
             c("service_id", "Service", Ref("service")).req().l(),
+            c("etablissement_id", "Établissement", Ref("etablissement")).l().derive("(select s.etablissement_id from service s where s.id = t.service_id)"),
             c("motif", "Motif", Texte).l(),
         ],
     },
@@ -452,6 +473,92 @@ pub static ENTITES: &[Entite] = &[
         ],
     },
     Entite {
+        nom: "article_magasin",
+        table: "article_magasin",
+        libelle: "Article dans un magasin",
+        pluriel: "Articles des magasins",
+        groupe: "Stock",
+        etiquette: "(select m.code from magasin m where m.id = t.magasin_id) \
+                    || ' / ' || (select a.code || ' – ' || a.designation from article a where a.id = t.article_id)",
+        champs: &[
+            c("magasin_id", "Magasin", Ref("magasin")).req().l().p(1).s("Rattachement"),
+            c("etablissement_id", "Établissement", Ref("etablissement")).l().s("Rattachement").derive("(select m.etablissement_id from magasin m where m.id = t.magasin_id)"),
+            c("article_id", "Article", Ref("article")).req().l().s("Rattachement"),
+            c("emplacement_principal_id", "Emplacement principal", Ref("emplacement")).l().s("Rattachement").aide("Adresse habituelle de rangement et de prélèvement, proposée à la réception et au prélèvement. Facultatif."),
+            c("actif", "Actif", Booleen).s("Rattachement"),
+            c("stock_mini", "Stock mini", Decimal).l().s("Dotation"),
+            c("stock_maxi", "Stock maxi", Decimal).l().s("Dotation"),
+            c("point_commande", "Point de commande", Decimal).l().s("Dotation"),
+        ],
+    },
+    Entite {
+        nom: "stock",
+        table: "stock",
+        libelle: "Ligne de stock",
+        pluriel: "Stock",
+        groupe: "Stock",
+        etiquette: "(select a.code || ' – ' || a.designation from article a where a.id = t.article_id) \
+                    || coalesce(' · lot ' || t.lot, '') || ' @ ' || (select m.code from magasin m where m.id = t.magasin_id)",
+        champs: &[
+            c("magasin_id", "Magasin", Ref("magasin")).req().l().p(1),
+            c("etablissement_id", "Établissement", Ref("etablissement")).l().derive("(select m.etablissement_id from magasin m where m.id = t.magasin_id)"),
+            c("emplacement_id", "Emplacement", Ref("emplacement")).l(),
+            c("article_id", "Article", Ref("article")).req().l(),
+            c("lot", "Lot", Texte).l(),
+            c("numero_serie", "N° de série", Texte).l(),
+            c("peremption", "Péremption", Date).l(),
+            c("quantite", "Quantité", Decimal).l(),
+            c("maj_le", "Dernier mouvement", Horodatage),
+        ],
+    },
+    Entite {
+        nom: "mouvement",
+        table: "mouvement",
+        libelle: "Mouvement",
+        pluriel: "Mouvements",
+        groupe: "Stock",
+        etiquette: "to_char(t.le, 'DD/MM/YYYY HH24:MI') || ' · ' || t.type || ' · ' \
+                    || (select a.code from article a where a.id = t.article_id) || ' × ' || trim(to_char(t.quantite, 'FM999999990.###'))",
+        champs: &[
+            c("type", "Type", Choix(&[("reception", "Réception fournisseur"), ("transfert", "Transfert entre magasins"), ("deplacement", "Déplacement d'emplacement"), ("sortie", "Sortie vers une UF"), ("retour_service", "Retour d'une UF"), ("retour_fournisseur", "Retour au fournisseur"), ("destruction", "Destruction"), ("inventaire_plus", "Inventaire : écart en plus"), ("inventaire_moins", "Inventaire : écart en moins")])).req().l().badge("*").s("Mouvement"),
+            c("article_id", "Article", Ref("article")).req().l().p(1).s("Mouvement"),
+            c("quantite", "Quantité (unité de stock)", Decimal).req().l().s("Mouvement"),
+            c("etablissement_id", "Établissement", Ref("etablissement")).l().s("Mouvement").derive("(select m.etablissement_id from magasin m where m.id = coalesce(t.magasin_source_id, t.magasin_destination_id))"),
+            c("le", "Le", Horodatage).l().calc().s("Mouvement"),
+            c("utilisateur", "Par", Texte).calc().s("Mouvement"),
+            c("magasin_source_id", "Magasin de départ", Ref("magasin")).l().s("Départ").quand("type", &["transfert", "deplacement", "sortie", "retour_fournisseur", "destruction", "inventaire_moins"]),
+            c("emplacement_source_id", "Emplacement de départ", Ref("emplacement")).s("Départ").quand("type", &["transfert", "deplacement", "sortie", "retour_fournisseur", "destruction", "inventaire_moins"]),
+            c("magasin_destination_id", "Magasin d'arrivée", Ref("magasin")).l().s("Arrivée").quand("type", &["reception", "transfert", "deplacement", "retour_service", "inventaire_plus"]),
+            c("emplacement_destination_id", "Emplacement d'arrivée", Ref("emplacement")).s("Arrivée").quand("type", &["reception", "transfert", "deplacement", "retour_service", "inventaire_plus"]),
+            c("lot", "Lot", Texte).l().s("Traçabilité"),
+            c("numero_serie", "N° de série", Texte).s("Traçabilité"),
+            c("peremption", "Péremption", Date).s("Traçabilité"),
+            c("fournisseur_id", "Fournisseur", Ref("fournisseur")).s("Fournisseur et prix").quand("type", &["reception", "retour_fournisseur"]),
+            c("prix_unitaire", "Prix unitaire HT", Decimal).s("Fournisseur et prix").quand("type", &["reception"]),
+            c("document", "Bon de livraison ou pièce", Texte).s("Fournisseur et prix"),
+            c("valeur_unitaire", "Valeur unitaire (PUMP)", Decimal).calc().s("Fournisseur et prix"),
+            c("uf_id", "UF", Ref("uf")).l().s("Destinataire").quand("type", &["sortie", "retour_service"]),
+            c("sejour", "N° de séjour ou IPP", Texte).s("Destinataire").quand("type", &["sortie", "retour_service"]).aide("Sortie nominative ; obligatoire pour un stupéfiant."),
+            c("prescripteur", "Prescripteur", Texte).s("Destinataire").quand("type", &["sortie"]).aide("Obligatoire pour un stupéfiant."),
+            c("motif", "Motif", Texte).s("Destinataire"),
+        ],
+    },
+    Entite {
+        nom: "valorisation",
+        table: "valorisation",
+        libelle: "Valorisation",
+        pluriel: "Valorisation (PUMP)",
+        groupe: "Stock",
+        etiquette: "(select a.code || ' – ' || a.designation from article a where a.id = t.article_id) \
+                    || ' @ ' || (select e.code from etablissement e where e.id = t.etablissement_id)",
+        champs: &[
+            c("etablissement_id", "Établissement", Ref("etablissement")).req().l().p(1),
+            c("article_id", "Article", Ref("article")).req().l(),
+            c("pump", "PUMP", Decimal).l(),
+            c("maj_le", "Mis à jour le", Horodatage).l(),
+        ],
+    },
+    Entite {
         nom: "compteur",
         table: "compteur",
         libelle: "Compteur de codes",
@@ -466,11 +573,21 @@ pub static ENTITES: &[Entite] = &[
             c("prefixe", "Préfixe", Texte).l(),
             c("longueur", "Nombre de chiffres", Entier).req().l(),
             c("prochain", "Prochain numéro", Entier).req().l(),
-            c("etablissement_id", "Pour l'établissement", Ref("etablissement")).l().aide("Facultatif : compteur propre à un établissement (UF, services, magasins…)."),
+            c("etablissement_id", "Pour l'établissement", Ref("etablissement")).l().p(1).aide("Facultatif : compteur propre à un établissement (UF, services, magasins…)."),
             c("actif", "Actif", Booleen).l(),
         ],
     },
 ];
+
+/// Ce que les pages et l'API permettent : « normal », « lecture » (stock, valorisation : calculés
+/// par la base) ou « ajout » (mouvements : on en saisit, on ne les modifie ni ne les supprime).
+pub fn mode(nom: &str) -> &'static str {
+    match nom {
+        "stock" | "valorisation" => "lecture",
+        "mouvement" => "ajout",
+        _ => "normal",
+    }
+}
 
 pub fn trouver(nom: &str) -> Option<&'static Entite> {
     ENTITES.iter().find(|e| e.nom == nom)
@@ -498,6 +615,7 @@ pub fn description() -> Value {
                         Decimal => ("decimal", Value::Null),
                         Booleen => ("booleen", Value::Null),
                         Date => ("date", Value::Null),
+                        Horodatage => ("horodatage", Value::Null),
                         Choix(v) => ("choix", json!(v.iter().map(|(k, l)| json!([k, l])).collect::<Vec<_>>())),
                         Ref(cible) => ("ref", json!(cible)),
                     };
@@ -505,10 +623,10 @@ pub fn description() -> Value {
                            "requis": c.requis, "liste": c.liste, "aide": c.aide,
                            "section": if c.section.is_empty() { "Général" } else { c.section },
                            "quand": c.quand.map(|(col, v)| json!({"col": col, "valeurs": v})),
-                           "badge": c.badge, "parent": c.parent, "externe": c.externe})
+                           "badge": c.badge, "parent": c.parent, "externe": c.externe, "calcule": c.calcule, "derive": !c.derive.is_empty()})
                 })
                 .collect();
-            json!({"nom": e.nom, "libelle": e.libelle, "pluriel": e.pluriel, "groupe": e.groupe, "champs": champs})
+            json!({"nom": e.nom, "libelle": e.libelle, "pluriel": e.pluriel, "groupe": e.groupe, "mode": mode(e.nom), "champs": champs})
         })
         .collect();
     json!({ "entites": entites })
