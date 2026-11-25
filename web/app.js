@@ -551,6 +551,7 @@ async function pageFiche(id, valeursInitiales = {}) {
       ${nouveau ? "" : `<nav class="onglets" id="onglets"><button type="button" data-onglet="fiche" class="actif">Fiche</button></nav>`}
       <div id="message"></div>
     </div>
+    ${e.nom === "article_fournisseur" ? `<div id="prix-connus" class="prix-connus" hidden></div>` : ""}
     <form id="formulaire" class="sections" novalidate>${cartes}</form>
     <div id="vue-onglet" hidden></div>`;
 
@@ -564,7 +565,11 @@ async function pageFiche(id, valeursInitiales = {}) {
     appliquerConditions();
     dessinerBadges();
     if (ev.target.tagName === "SELECT" || ev.target.type === "hidden") dessinerRattachement();
+    if (e.nom === "article_fournisseur" && ["article_id", "fournisseur_id", "etablissement_id", "rang", "actif"].includes(ev.target.name)) {
+      afficherPrixConnus();
+    }
   });
+  if (e.nom === "article_fournisseur") afficherPrixConnus();
   for (const div of $$(".combo", form)) {
     const c = e.champs.find((x) => x.col === div.dataset.col);
     activerCombo(div, () => contexteFormulaire(form, c));
@@ -1049,6 +1054,59 @@ async function supprimer() {
   } catch (err) {
     message(err.message, "erreur");
   }
+}
+
+// ------------------------------------------------------------------ Prix fournisseur : prix déjà connus
+
+/** Fiche « prix fournisseur » : dès qu'un article est choisi, ses autres prix (chez qui, pour quelle
+ *  portée, à quel rang), avec deux avertissements : même fournisseur déjà présent sur la même
+ *  portée (doublon probable), et principal actuel qui passera au rang 2 si cette fiche est principale. */
+async function afficherPrixConnus() {
+  const zone = $("#prix-connus"), form = $("#formulaire");
+  if (!zone || !form) return;
+  const article = form.elements.article_id.value;
+  if (!article) { zone.hidden = true; return; }
+  let lignes;
+  try { lignes = (await apiListe(`/api/e/article_fournisseur?article_id=${article}&limit=100`)).lignes; }
+  catch { zone.hidden = true; return; }
+  if (form.elements.article_id.value !== article) return;  // un autre article a été choisi entre-temps
+  const autres = lignes.filter((l) => !etat.fiche || l.id !== etat.fiche.id);
+  const fournisseur = form.elements.fournisseur_id.value;
+  const portee = form.elements.etablissement_id.value || "";
+  const rang = Number(form.elements.rang.value || 1);
+  const actif = form.elements.actif ? form.elements.actif.checked : true;
+  const memePortee = (l) => String(l.etablissement_id ?? "") === portee;
+  const prix = (v) => (v === null || v === undefined ? "—" : `${nf.format(Number(v))} €`);
+  const nom = (l) => l._l_fournisseur_id || `#${l.fournisseur_id}`;
+  const lieu = (l) => l._l_etablissement_id || "Tout le groupe";
+
+  const alertes = [];
+  const doublon = autres.find((l) => fournisseur && String(l.fournisseur_id) === fournisseur && memePortee(l));
+  if (doublon) {
+    alertes.push(`${esc(nom(doublon))} a déjà un prix pour cet article sur la même portée (${esc(lieu(doublon))}, ${prix(doublon.prix_unitaire_ht)}, rang ${doublon.rang}). `
+      + `<a href="#article_fournisseur/${doublon.id}">Modifier plutôt cette fiche</a>.`);
+  }
+  const principal = autres.find((l) => l.rang === 1 && l.actif && memePortee(l));
+  if (principal && rang === 1 && actif) {
+    alertes.push(`Enregistrer en rang 1 fera passer le principal actuel, ${esc(nom(principal))} (${prix(principal.prix_unitaire_ht)}), au rang 2.`);
+  }
+
+  const actifs = autres.filter((l) => l.actif && l.prix_unitaire_ht !== null);
+  const moinsCher = actifs.reduce((m, l) => (m === null || Number(l.prix_unitaire_ht) < Number(m.prix_unitaire_ht) ? l : m), null);
+  zone.hidden = false;
+  zone.innerHTML = `
+    <div class="prix-connus-tete"><strong>Prix déjà connus pour cet article</strong>
+      <span class="compte">${autres.length ? `${autres.length} prix${moinsCher ? ` · le moins cher : ${esc(nom(moinsCher))}, ${prix(moinsCher.prix_unitaire_ht)}` : ""}` : "aucun autre prix"}</span></div>
+    ${alertes.map((a) => `<div class="message attention">${a}</div>`).join("")}
+    ${autres.length ? `<table><thead><tr><th>Fournisseur</th><th>Portée</th><th>Référence</th><th>Rang</th><th class="num">Prix HT</th><th class="num">TVA</th><th>Validité</th></tr></thead><tbody>
+      ${autres.sort((a, b) => a.rang - b.rang || Number(a.prix_unitaire_ht) - Number(b.prix_unitaire_ht)).map((l) => `
+        <tr data-id="${l.id}" class="${l.actif ? "" : "inactif"}${memePortee(l) ? " meme-portee" : ""}">
+          <td>${esc(nom(l))}</td><td>${esc(lieu(l))}</td><td>${esc(l.reference_fournisseur || "")}</td>
+          <td>${l.rang === 1 ? "Principal" : l.rang}${l.actif ? "" : " (inactif)"}</td>
+          <td class="num">${prix(l.prix_unitaire_ht)}</td><td class="num">${l.taux_tva === null ? "" : `${nf.format(Number(l.taux_tva))} %`}</td>
+          <td>${[l.date_debut, l.date_fin].some((d) => d) ? `${l.date_debut ? afficher({ genre: "date" }, l.date_debut) : "…"} → ${l.date_fin ? afficher({ genre: "date" }, l.date_fin) : "…"}` : ""}</td></tr>`).join("")}
+      </tbody></table>` : ""}`;
+  lierLignes(zone, "article_fournisseur");
 }
 
 // ------------------------------------------------------------------ Onglets : fiches liées et historique

@@ -278,6 +278,15 @@ body.nav-repliee #montrer-nav { display: inline-flex; }
   background: transparent; border-color: transparent; box-shadow: none; padding-left: 0;
   font: 600 13px var(--mono); color: var(--fg-doux); cursor: default;
 }
+/* Prix déjà connus (fiche prix fournisseur). */
+.prix-connus { border: 1px solid var(--trait); border-radius: var(--rayon); background: var(--panneau); padding: 10px 12px; margin-bottom: 16px; }
+.prix-connus-tete { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; margin-bottom: 8px; }
+.prix-connus .message { margin-bottom: 8px; }
+.prix-connus table { background: var(--fond); border: 1px solid var(--trait); border-radius: var(--rayon-petit); }
+.prix-connus th, .prix-connus td { padding: 5px 8px; font-size: 13px; }
+.prix-connus tr.meme-portee td { font-weight: 600; }
+.message.attention { background: var(--attention-fond); color: #8a5300; }
+.message.attention a { color: inherit; font-weight: 600; }
 .provenance { font-size: 11px; color: var(--accent); margin-top: 3px; }
 button.prendre { margin-left: auto; height: 20px; padding: 0 7px; font-size: 11px; color: var(--accent); background: var(--accent-fond); border-color: transparent; border-radius: 999px; }
 button.prendre:hover { background: #d4e3f0; }
