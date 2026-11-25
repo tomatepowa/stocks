@@ -61,6 +61,8 @@ impl From<tokio_postgres::Error> for Erreur {
                 "dmi_tracabilite" => "Un DMI doit avoir le lot ou le n° de série obligatoire, à la réception et à la sortie".to_string(),
                 "liste_medicament" => "Seul un médicament peut relever des listes I et II ou des stupéfiants".to_string(),
                 "mds_tracabilite" => "Un médicament dérivé du sang doit avoir le lot obligatoire à la réception et à la sortie".to_string(),
+                "magasin_pui_economat" => "Un magasin d'économat ne dépend pas d'une PUI".to_string(),
+                "magasin_pui_obligatoire" => "Un magasin de PUI doit être rattaché à une PUI".to_string(),
                 "classe_dm_nature" => "La classe de DM ne s'applique qu'aux dispositifs médicaux".to_string(),
                 c => match c.strip_prefix(&format!("{table}_")).and_then(|c| c.strip_suffix("_check")) {
                     Some(col) if !col.is_empty() && schema::ENTITES.iter().any(|e| e.table == table && e.champ(col).is_some()) => {

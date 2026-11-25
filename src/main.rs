@@ -50,6 +50,7 @@ pub struct Etat {
 const MIGRATIONS: &[(&str, &str)] = &[
     ("001_socle", include_str!("../migrations/001_socle.sql")),
     ("002_compteurs_articles", include_str!("../migrations/002_compteurs_articles.sql")),
+    ("003_magasin_pui", include_str!("../migrations/003_magasin_pui.sql")),
 ];
 
 async fn migrer(pool: &Pool) -> Result<()> {

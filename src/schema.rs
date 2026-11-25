@@ -224,6 +224,7 @@ pub static ENTITES: &[Entite] = &[
             c("libelle", "Libellé", Texte).req().l(),
             c("type", "Type", Choix(&[("pui", "PUI"), ("economat", "Économat"), ("service", "Armoire de service")])).req().l().badge("*"),
             c("uf_id", "UF desservie", Ref("uf")).l().quand("type", &["service"]),
+            c("pui_id", "PUI responsable", Ref("pui")).l().quand("type", &["pui", "service"]).aide("Vide : PUI de l'établissement."),
             c("actif", "Actif", Booleen),
         ],
     },
