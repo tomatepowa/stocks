@@ -5,6 +5,7 @@
 
 mod crud;
 mod referentiels;
+mod registre;
 mod schema;
 
 use std::path::PathBuf;
@@ -103,6 +104,7 @@ async fn main() -> Result<()> {
         .route("/api/etablissement/{id}/referencer", post(crud::referencer))
         .route("/api/article/{id}/sources", get(referentiels::sources))
         .route("/api/article/{id}/reprendre", post(referentiels::reprendre))
+        .route("/api/registre", get(registre::registre))
         .route("/api/catalogue", get(referentiels::rechercher))
         .route("/api/catalogue/imports", get(referentiels::imports))
         .route(

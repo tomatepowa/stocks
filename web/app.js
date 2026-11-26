@@ -234,7 +234,8 @@ function dessinerMenu() {
     if (!groupes.has(e.groupe)) groupes.set(e.groupe, []);
     groupes.get(e.groupe).push(e);
   }
-  groupes.set("Outils", [{ nom: "admin_pui", pluriel: "Administration de la PUI" }, { nom: "import", pluriel: "Import de catalogues" }]);
+  groupes.set("Outils", [{ nom: "registre", pluriel: "Registre des stupéfiants" }, { nom: "admin_pui", pluriel: "Administration de la PUI" },
+    { nom: "import", pluriel: "Import de catalogues" }]);
   const ouverts = prefs.lire("groupesOuverts", ["Structure", "Articles"]);
   let html = "";
   for (const [g, entites] of groupes) {
@@ -280,10 +281,11 @@ function router() {
   const [chemin, requete] = location.hash.slice(1).split("?");
   const [nom, id] = chemin.split("/");
   document.body.classList.toggle("mode-fiche", !!id && !!etat.entites[nom]);
-  if (nom === "import" || nom === "admin_pui") {
+  const outils = { import: () => pageImport(), admin_pui: () => pageAdminPui(), registre: () => pageRegistre() };
+  if (outils[nom]) {
     marquerMenu(nom);
     etat.fiche = null;
-    (nom === "import" ? pageImport : pageAdminPui)();
+    outils[nom]();
     return;
   }
   const e = etat.entites[nom];
@@ -1548,6 +1550,131 @@ async function pageAdminPui() {
       } catch (err) { c.checked = !c.checked; alert(err.message); }
     });
   }
+}
+
+// ------------------------------------------------------------------ Registre des stupéfiants
+
+/** Registre déduit des mouvements : périmètre (PUI ou magasin), période, article facultatif. */
+async function pageRegistre() {
+  const r = (etat.registre ??= {});
+  const puis = await api("/api/e/pui");
+  if (!r.pui && !r.magasin && puis.length) r.pui = String(puis[0].id);
+  const auj = new Date();
+  r.mois ??= `${auj.getFullYear()}-${String(auj.getMonth() + 1).padStart(2, "0")}`;
+  $("#page").innerHTML = `
+    <div class="tete-liste sans-impression"><h1>Registre des stupéfiants</h1></div>
+    <div class="ligne-champs sans-impression">
+      <label class="filtre"><span>PUI (magasins de la pharmacie)</span><select id="reg-pui"><option value="">—</option>
+        ${puis.map((p) => `<option value="${p.id}" ${r.pui === String(p.id) ? "selected" : ""}>${esc(p._etiquette)}</option>`).join("")}</select></label>
+      <div class="filtre"><span>ou un magasin précis</span>${await comboHtml("reg-magasin", "magasin", r.magasin, { placeholder: "Armoire, dépôt…" })}</div>
+      <label class="filtre"><span>Mois</span><input type="month" id="reg-mois" value="${r.mois}"></label>
+      <div class="filtre"><span>Article (facultatif)</span>${await comboHtml("reg-article", "article", r.article, { placeholder: "Tous les stupéfiants" })}</div>
+      <span class="espace"></span>
+      <button type="button" id="reg-csv">Exporter (CSV)</button>
+      <button type="button" class="principal" id="reg-imprimer">Imprimer ou PDF</button>
+    </div>
+    <div id="registre"></div>`;
+  activerCombo($(".filtre .combo[data-cible=magasin]"), () => ({}), (v) => { r.magasin = v; if (v) { r.pui = ""; $("#reg-pui").value = ""; } dessinerRegistre(); });
+  activerCombo($(".filtre .combo[data-cible=article]"), () => ({ actif: "true" }), (v) => { r.article = v; dessinerRegistre(); });
+  $("#reg-pui").addEventListener("change", (ev) => {
+    r.pui = ev.target.value;
+    if (r.pui) { r.magasin = ""; remplirCombo("reg-magasin", "", "", $("#page")); }
+    dessinerRegistre();
+  });
+  $("#reg-mois").addEventListener("change", (ev) => { r.mois = ev.target.value; dessinerRegistre(); });
+  $("#reg-imprimer").addEventListener("click", () => window.print());
+  $("#reg-csv").addEventListener("click", exporterRegistre);
+  await dessinerRegistre();
+}
+
+function periodeRegistre() {
+  const [a, m] = etat.registre.mois.split("-").map(Number);
+  const fin = new Date(a, m, 0).getDate();
+  return { du: `${a}-${String(m).padStart(2, "0")}-01`, au: `${a}-${String(m).padStart(2, "0")}-${fin}` };
+}
+
+async function chargerRegistre() {
+  const r = etat.registre, { du, au } = periodeRegistre();
+  const p = new URLSearchParams({ du, au });
+  if (r.magasin) p.set("magasin_id", r.magasin); else if (r.pui) p.set("pui_id", r.pui); else return null;
+  if (r.article) p.set("article_id", r.article);
+  return { ...(await api(`/api/registre?${p}`)), du, au };
+}
+
+async function dessinerRegistre() {
+  const zone = $("#registre");
+  let d;
+  try { d = await chargerRegistre(); } catch (err) { zone.innerHTML = `<p class="message erreur">${esc(err.message)}</p>`; return; }
+  if (!d) { zone.innerHTML = `<p class="vide">Choisissez une PUI ou un magasin.</p>`; return; }
+  const type = (v) => (etat.entites.mouvement.champs.find((c) => c.col === "type").extra.find(([k]) => k === v) || [v, v])[1];
+  const n = (v) => (Number(v) ? nf.format(Number(v)) : "");
+  const date = (v) => afficher({ genre: "date" }, v);
+  const e = d.entete || {};
+  const adresse = [e.adresse, [e.code_postal, e.commune].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  const aujourdhui = new Date().toISOString().slice(0, 10);
+  const enCours = d.au >= aujourdhui;
+  const entete = `${esc(e.etablissement || "")}${adresse ? ` · ${esc(adresse)}` : ""}${e.finess ? ` · FINESS ${esc(e.finess)}` : ""}`;
+  let html = `<div class="entete-registre">
+      <div><strong>${entete || "Établissement non renseigné"}</strong></div>
+      <div>Registre des stupéfiants · ${esc(e.perimetre || "")}${e.pharmacien_gerant ? ` · pharmacien gérant : ${esc(e.pharmacien_gerant)}` : ""}</div>
+      <div>Période du ${date(d.du)} au ${date(d.au)} · édité le ${new Date().toLocaleString("fr-FR")}</div></div>`;
+  if (!d.articles.length) {
+    zone.innerHTML = html + `<p class="vide">Aucun mouvement de stupéfiant dans ce périmètre.</p>`;
+    return;
+  }
+  html += `<h2 class="sous-titre-page">Balance de la période</h2>
+    <div class="tableau"><table class="registre"><thead><tr><th>Article</th><th>Unité</th><th class="num">Solde initial</th><th class="num">Entrées</th>
+      <th class="num">Sorties</th><th class="num">Solde final</th>${enCours ? `<th class="num">Stock physique</th><th class="num">Écart</th>` : ""}</tr></thead><tbody>
+    ${d.articles.map((a) => {
+      const ecart = Number(a.stock_physique) - Number(a.solde_final);
+      return `<tr><td><a href="#article/${a.id}">${esc(a.code)} – ${esc(a.designation)}</a></td><td>${esc(a.unite_stock)}</td>
+        <td class="num">${nf.format(Number(a.solde_initial))}</td><td class="num">${n(a.entrees)}</td><td class="num">${n(a.sorties)}</td>
+        <td class="num"><strong>${nf.format(Number(a.solde_final))}</strong></td>
+        ${enCours ? `<td class="num">${nf.format(Number(a.stock_physique))}</td><td class="num ${ecart ? "ecart" : ""}">${ecart ? nf.format(ecart) : "—"}</td>` : ""}</tr>`;
+    }).join("")}</tbody></table></div>`;
+  for (const a of d.articles) {
+    const lignes = d.lignes.filter((l) => l.article_id === a.id);
+    const colonnes = 11;
+    html += `<section class="registre-article">
+      <table class="registre"><thead>
+        <tr class="entete-page"><th colspan="${colonnes}">${entete} · Registre des stupéfiants · ${date(d.du)} au ${date(d.au)}</th></tr>
+        <tr class="titre-article"><th colspan="${colonnes}">${esc(a.code)} – ${esc(a.designation)} <span class="discret">(${esc(a.unite_stock)})</span></th></tr>
+        <tr><th>Date</th><th>Mouvement</th><th>Lot</th><th>Origine</th><th>Destination</th><th class="num">Entrée</th><th class="num">Sortie</th>
+          <th class="num">Solde</th><th>Séjour, prescripteur</th><th>Motif ou pièce</th><th>Saisi par</th></tr></thead><tbody>
+        <tr class="solde"><td>${date(d.du)}</td><td colspan="6">Solde au début de la période</td><td class="num">${nf.format(Number(a.solde_initial))}</td><td colspan="3"></td></tr>
+        ${lignes.map((l) => `<tr class="${l.hors_regle ? "hors-regle" : ""}${l.interne ? " interne" : ""}">
+          <td>${esc(new Date(l.le).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }))}</td>
+          <td><a href="#mouvement/${l.id}">${esc(type(l.type))}</a>${l.interne ? ` <span class="discret">interne</span>` : ""}${l.hors_regle ? ` <span class="badge alerte">Hors règle</span>` : ""}</td>
+          <td>${esc(l.lot || "")}${l.peremption ? `<br><span class="discret">${date(l.peremption)}</span>` : ""}</td>
+          <td>${esc(l.origine || l.fournisseur || "")}</td><td>${esc(l.destination || l.uf || "")}</td>
+          <td class="num">${n(l.entree)}</td><td class="num">${n(l.sortie)}</td><td class="num"><strong>${nf.format(Number(l.solde_apres))}</strong></td>
+          <td>${esc([l.sejour, l.prescripteur].filter(Boolean).join(" · "))}</td><td>${esc([l.motif, l.document].filter(Boolean).join(" · "))}</td>
+          <td>${esc(l.utilisateur)}</td></tr>`).join("")}
+        <tr class="solde"><td>${date(d.au)}</td><td colspan="4">Solde à la fin de la période</td><td class="num">${n(a.entrees)}</td><td class="num">${n(a.sorties)}</td>
+          <td class="num"><strong>${nf.format(Number(a.solde_final))}</strong></td><td colspan="3"></td></tr>
+      </tbody></table></section>`;
+  }
+  zone.innerHTML = html;
+}
+
+async function exporterRegistre() {
+  const d = await chargerRegistre();
+  if (!d) return;
+  const articles = Object.fromEntries(d.articles.map((a) => [a.id, a]));
+  const champ = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lignes = [["Article", "Désignation", "Unité", "Date", "Mouvement", "Lot", "Péremption", "Origine", "Destination", "Entrée", "Sortie",
+    "Solde", "Séjour", "Prescripteur", "Motif", "Pièce", "Saisi par", "Hors règle"].map(champ).join(";")];
+  for (const l of d.lignes) {
+    const a = articles[l.article_id];
+    lignes.push([a.code, a.designation, a.unite_stock, new Date(l.le).toLocaleString("fr-FR"), l.type, l.lot, l.peremption,
+      l.origine || l.fournisseur, l.destination || l.uf, String(l.entree).replace(".", ","), String(l.sortie).replace(".", ","),
+      String(l.solde_apres).replace(".", ","), l.sejour, l.prescripteur, l.motif, l.document, l.utilisateur, l.hors_regle ? "oui" : ""].map(champ).join(";"));
+  }
+  const lien = document.createElement("a");
+  lien.href = URL.createObjectURL(new Blob(["\uFEFF" + lignes.join("\r\n")], { type: "text/csv;charset=utf-8" }));
+  lien.download = `registre-stupefiants-${etat.registre.mois}.csv`;
+  lien.click();
+  URL.revokeObjectURL(lien.href);
 }
 
 // ------------------------------------------------------------------ Impacts d'une modification en cours

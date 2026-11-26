@@ -494,3 +494,34 @@ td.exemples { color: var(--fg-doux); white-space: normal; font-size: 12px; }
 }
 @media (max-width: 1400px) { :root { --nav-l: 240px; --menu-l: 190px; } }
 .tete-liste select { width: auto; max-width: 100%; }
+
+/* ================================================================== Registre des stupéfiants */
+.entete-registre { background: var(--fond); border: 1px solid #e6e1d8; border-radius: 12px; padding: 10px 14px; margin: 8px 0 4px;
+  font-size: 13px; color: var(--fg-doux); display: grid; gap: 2px; }
+.entete-registre strong { color: var(--fg); font-size: 14px; }
+.registre-article { margin-top: 18px; }
+table.registre th, table.registre td { white-space: normal; vertical-align: top; font-size: 13px; padding: 5px 8px; }
+table.registre tbody tr { cursor: default; }
+table.registre tr.entete-page { display: none; }
+table.registre tr.titre-article th { background: var(--fond); color: var(--fg); font-size: 14px; font-weight: 650; }
+table.registre tr.solde td { background: #f3f0ea; font-weight: 600; }
+table.registre tr.interne td { color: var(--fg-doux); }
+table.registre tr.hors-regle td { background: var(--attention-fond); }
+table.registre td.ecart { color: var(--alerte); font-weight: 700; }
+
+@media print {
+  @page { size: A4 landscape; margin: 12mm; }
+  body { background: #fff; font-size: 10pt; }
+  .barre, #menu, #navigation, .sans-impression, .sous-titre-page + .tableau .ecart:empty { display: none !important; }
+  .cadre, body.mode-fiche .cadre { display: block; }
+  #page { padding: 0; }
+  .tableau { border: 0; overflow: visible; }
+  table.registre { border-collapse: collapse; }
+  table.registre th, table.registre td { border: 1px solid #999; font-size: 9pt; }
+  table.registre thead { display: table-header-group; }
+  table.registre tr.entete-page { display: table-row; }
+  table.registre tr.entete-page th { background: #fff; font-weight: 400; color: #333; text-align: left; }
+  table.registre tr { break-inside: avoid; }
+  .registre-article { break-before: page; }
+  a { color: inherit; text-decoration: none; }
+}
