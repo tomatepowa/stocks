@@ -55,6 +55,7 @@ pub struct Etat {
 const MIGRATIONS: &[(&str, &str)] = &[
     ("001_schema", include_str!("../migrations/001_schema.sql")),
     ("002_stupefiants_securises", include_str!("../migrations/002_stupefiants_securises.sql")),
+    ("003_lots", include_str!("../migrations/003_lots.sql")),
 ];
 
 async fn migrer(pool: &Pool) -> Result<()> {

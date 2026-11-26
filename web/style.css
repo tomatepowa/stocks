@@ -355,6 +355,8 @@ button.prendre:hover { background: #d4e3f0; }
 .saisie-rapide .grille { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
 .saisie-rapide .champ { margin: 6px 0 8px; }
 .fenetre .aide-mouvement { margin-bottom: 8px; }
+select.choix-lot { width: 100%; }
+input[readonly][name="peremption"] { background: var(--fond-doux); color: var(--fg-doux); cursor: not-allowed; }
 .mouvement-rapide summary { width: auto; padding: 0 12px; font-size: 14px; }
 .resume-stock { margin-top: 6px; font-size: 13px; color: var(--fg-doux); display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .resume-stock strong { color: var(--ok); }

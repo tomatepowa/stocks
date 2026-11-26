@@ -1226,10 +1226,82 @@ function remplirCombo(col, id, libelle, form = $("#formulaire")) {
   if (id) cacheEtiquettes.set(`${div.dataset.cible}/${id}`, libelle);
 }
 
+/** Champ « Lot » d'un mouvement.
+ *  Départ d'un magasin (sortie, transfert…) : liste des seuls lots disponibles ; le choix remplit la
+ *  péremption (verrouillée), le n° de série et l'emplacement.
+ *  Entrée : saisie libre avec les lots connus de l'article ; un lot connu reprend sa péremption. */
+const DEPUIS_STOCK = ["transfert", "deplacement", "sortie", "retour_fournisseur", "destruction", "inventaire_moins"];
+async function champLot(form) {
+  const el = form.elements.lot, per = form.elements.peremption;
+  if (!el || !per) return;
+  const div = el.closest(".champ");
+  const type = form.elements.type ? form.elements.type.value : "";
+  const article = form.elements.article_id ? form.elements.article_id.value : "";
+  let choix = $("select.choix-lot", div);
+  if (!choix) {
+    form._idLots = form._idLots || `lots-${Math.random().toString(36).slice(2)}`;
+    el.insertAdjacentHTML("afterend", `<select class="choix-lot" hidden></select><datalist id="${form._idLots}"></datalist>`);
+    choix = $("select.choix-lot", div);
+  }
+  const date = (v) => afficher({ genre: "date" }, v);
+  if (DEPUIS_STOCK.includes(type)) {
+    el.hidden = true;
+    choix.hidden = false;
+    per.readOnly = true;
+    per.title = "Péremption du lot choisi";
+    const source = form.elements.magasin_source_id ? form.elements.magasin_source_id.value : "";
+    if (!article || !source) {
+      choix.innerHTML = `<option value="">Choisissez d'abord l'article et le magasin de départ</option>`;
+      choix.disabled = true;
+      return;
+    }
+    const lignes = (await api(`/api/e/stock?article_id=${article}&magasin_id=${source}&limit=300`))
+      .sort((a, b) => (a.peremption || "9999").localeCompare(b.peremption || "9999"));
+    form._lignesLot = lignes;
+    choix.disabled = !lignes.length;
+    choix.innerHTML = `<option value="">${lignes.length ? "Choisir un lot disponible…" : "Aucun lot disponible dans ce magasin"}</option>`
+      + lignes.map((l, i) => `<option value="${i}">${esc(l.lot || "sans lot")} · ${l.peremption ? `périme le ${date(l.peremption)}` : "sans péremption"}`
+        + ` · ${nf.format(Number(l.quantite))} disponible${Number(l.quantite) > 1 ? "s" : ""}${l.emplacement_id ? ` · ${esc(decouper(l._l_emplacement_id)[1])}` : ""}</option>`).join("");
+    const actuel = lignes.findIndex((l) => (l.lot || "") === el.value && (l.peremption || "") === per.value);
+    choix.value = actuel >= 0 ? String(actuel) : "";
+    choix.onchange = () => {
+      const l = lignes[Number(choix.value)];
+      if (!l) { el.value = ""; per.value = ""; return; }
+      el.value = l.lot || "";
+      per.value = l.peremption || "";
+      if (form.elements.numero_serie) form.elements.numero_serie.value = l.numero_serie || "";
+      remplirCombo("emplacement_source_id", l.emplacement_id, l._l_emplacement_id || "", form);
+      form.elements.quantite.max = l.quantite;
+      form.dispatchEvent(new Event("input"));
+    };
+  } else {
+    el.hidden = false;
+    choix.hidden = true;
+    el.setAttribute("list", form._idLots);
+    el.setAttribute("autocomplete", "off");
+    form._lots = article ? await api(`/api/e/lot?article_id=${article}&limit=500`) : [];
+    $(`#${form._idLots}`).innerHTML = form._lots.map((l) => `<option value="${esc(l.lot)}">${l.peremption ? `périme le ${date(l.peremption)}` : ""}</option>`).join("");
+    const reprendre = () => {
+      const l = form._lots.find((x) => x.lot === el.value.trim());
+      if (l && l.peremption) {
+        per.value = l.peremption;
+        per.readOnly = true;
+        per.title = `Lot connu : il périme le ${date(l.peremption)}`;
+      } else {
+        per.readOnly = false;
+        per.title = "";
+      }
+    };
+    el.oninput = reprendre;
+    reprendre();
+  }
+}
+
 /** Nouveau mouvement. Avec un départ : stock disponible de l'article dans ce magasin, du premier au
  *  dernier périmé, avec « Prendre ce lot » (emplacement, lot, série, péremption). Avec une arrivée :
  *  emplacement principal de l'article dans ce magasin, proposé s'il n'est pas déjà choisi. */
 async function aideMouvement(form = $("#formulaire")) {
+  await champLot(form);
   let zone = form.previousElementSibling;
   if (!zone || !zone.classList.contains("aide-mouvement")) {
     form.insertAdjacentHTML("beforebegin", `<div class="prix-connus aide-mouvement" hidden></div>`);
@@ -1274,6 +1346,8 @@ async function aideMouvement(form = $("#formulaire")) {
     b.addEventListener("click", async () => {
       const l = lignes[Number(b.dataset.prendre)];
       remplirCombo("emplacement_source_id", l.emplacement_id, l._l_emplacement_id || "", form);
+      const choix = $("select.choix-lot", form);
+      if (choix && form._lignesLot) { const i = form._lignesLot.findIndex((x) => x.id === l.id); if (i >= 0) choix.value = String(i); }
       form.elements.lot.value = l.lot || "";
       form.elements.numero_serie.value = l.numero_serie || "";
       form.elements.peremption.value = l.peremption || "";

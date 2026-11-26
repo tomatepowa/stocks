@@ -511,6 +511,21 @@ pub static ENTITES: &[Entite] = &[
         ],
     },
     Entite {
+        nom: "lot",
+        table: "lot",
+        libelle: "Lot",
+        pluriel: "Lots",
+        groupe: "Stock",
+        etiquette: "t.lot || coalesce(' · péremption ' || to_char(t.peremption, 'DD/MM/YYYY'), '') \
+                    || ' · ' || (select a.code from article a where a.id = t.article_id)",
+        champs: &[
+            c("article_id", "Article", Ref("article")).req().l().p(1),
+            c("lot", "N° de lot", Texte).req().l(),
+            c("peremption", "Péremption", Date).l(),
+            c("cree_le", "Première entrée", Horodatage).l(),
+        ],
+    },
+    Entite {
         nom: "mouvement",
         table: "mouvement",
         libelle: "Mouvement",
@@ -583,7 +598,7 @@ pub static ENTITES: &[Entite] = &[
 /// par la base) ou « ajout » (mouvements : on en saisit, on ne les modifie ni ne les supprime).
 pub fn mode(nom: &str) -> &'static str {
     match nom {
-        "stock" | "valorisation" => "lecture",
+        "stock" | "valorisation" | "lot" => "lecture",
         "mouvement" => "ajout",
         _ => "normal",
     }
