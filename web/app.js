@@ -240,7 +240,10 @@ function dessinerMenu() {
   let html = "";
   for (const [g, entites] of groupes) {
     html += `<details data-groupe="${esc(g)}"${ouverts.includes(g) ? " open" : ""}><summary>${esc(g)}</summary>`;
-    for (const e of entites) html += `<a href="#${e.nom}" data-nom="${e.nom}" title="${esc(e.pluriel)}">${esc(e.pluriel)}</a>`;
+    for (const e of entites) {
+      const point = e.libelle ? `<span class="point" style="--teinte: ${teinte(e)}"></span>` : `<span class="point outil"></span>`;
+      html += `<a href="#${e.nom}" data-nom="${e.nom}" title="${esc(e.libelle ? description(e) || e.pluriel : e.pluriel)}">${point}${esc(e.pluriel)}</a>`;
+    }
     html += `</details>`;
   }
   $("#menu").innerHTML = html;
@@ -354,8 +357,10 @@ async function pageListe() {
   const e = etat.courant, m = memo(e);
   etat.fiche = null;
   $("#page").innerHTML = `
+    <div class="bandeau-type" style="--teinte: ${teinte(e)}">${pastille(e)}<div><strong>${esc(e.pluriel)}</strong>
+      <span>${esc(description(e))}</span></div></div>
     <div class="tete-liste">
-      <h1>${esc(e.pluriel)}</h1>
+      <h1 class="sr">${esc(e.pluriel)}</h1>
       <input type="search" id="recherche" placeholder="Rechercher : code, libellé…" value="${esc(m.q)}">
       <button type="button" id="bouton-filtres" class="filtres-bouton">Filtres</button>
       <span class="compte" id="compte"></span>
@@ -473,7 +478,7 @@ async function dessinerNavigation() {
     const enRecherche = document.activeElement && document.activeElement.id === "nav-recherche";
     nav.innerHTML = `
       <div class="nav-tete">
-        <div class="nav-titre"><a href="#${e.nom}" title="Revenir à la liste">${esc(e.pluriel)}</a>
+        <div class="nav-titre">${pastille(e, "petite")}<a href="#${e.nom}" title="Revenir à la liste">${esc(e.pluriel)}</a>
           <span class="compte">${nf.format(r.total)}</span>
           <button type="button" class="discret icone" id="replier-nav" title="Masquer cette liste">«</button></div>
         <input type="search" id="nav-recherche" placeholder="Filtrer…" value="${esc(m.q)}">
@@ -570,11 +575,14 @@ async function pageFiche(id, valeursInitiales = {}) {
     etablissement: `<button type="button" id="referencer" title="Créer les articles-sites manquants">Référencer des articles</button>`,
   }[e.nom] || "");
   $("#page").innerHTML = `
-    <div class="tete">
+    <div class="tete" style="--teinte: ${teinte(e)}">
       <div class="fil" id="fil"><a href="#${e.nom}">${esc(e.pluriel)}</a></div>
       <div class="tete-ligne">
-        <div class="titre"><span class="pastille-fichier" style="--teinte: ${teinte(e)}" title="${esc(e.libelle)}">${esc(initiales(e))}</span>
-          <div class="titre-ligne"><h1>${code ? `<span class="titre-code">${esc(code)}</span>` : ""}${esc(titre)}</h1><div class="badges" id="badges"></div></div></div>
+        <div class="titre">${pastille(e)}
+          <div><div class="type-fiche" title="${esc(description(e))}">${esc(e.libelle)}</div>
+          <div class="titre-ligne"><h1>${code ? `<span class="titre-code">${esc(code)}</span>` : ""}<span id="titre-texte">${esc(titre)}</span></h1>
+            <div class="badges" id="badges"></div></div>
+          <div class="sous-titre-fiche" id="sous-titre" hidden></div></div></div>
         <div class="actions-tete">
         <span class="etat-saisie" id="etat-saisie" hidden>● Non enregistré</span>
         ${nouveau ? "" : `<div class="pagination">
@@ -645,6 +653,13 @@ async function pageFiche(id, valeursInitiales = {}) {
   }
   appliquerConditions();
   dessinerBadges();
+  if (ligne) {
+    titreLisible(e, ligne).then((t) => {
+      if (!t || etat.fiche !== ligne) return;
+      $("#titre-texte").textContent = t.titre;
+      if (t.sous) { $("#sous-titre").textContent = t.sous; $("#sous-titre").hidden = false; }
+    });
+  }
   await dessinerRattachement();
   if (!nouveau && e.nom === "article") {
     $("#sources").addEventListener("click", () => ouvrirSources(null));
@@ -1392,9 +1407,73 @@ async function dessinerResumeStock() {
 
 // ------------------------------------------------------------------ Fiche en lecture
 
-const TEINTES = { Structure: "#3b6ea5", Articles: "#2f7d4f", Achats: "#a8620b", Stock: "#7a4fa0", "Paramètres": "#6b6862" };
-const teinte = (e) => TEINTES[e.groupe] || "#6b6862";
-const initiales = (e) => e.libelle.split(/[\s-]+/).filter((m) => m.length > 2 || /^[A-Z]/.test(m)).slice(0, 2).map((m) => m[0].toUpperCase()).join("");
+/** Identité de chaque type de fiche : couleur, sigle et phrase qui dit ce qu'il contient. On la
+ *  retrouve partout (menu, liste, liste latérale, en-tête de fiche) pour savoir ce que l'on regarde. */
+const IDENTITE = {
+  entite_juridique: ["#37474f", "EJ", "Société qui porte un ou plusieurs établissements et leur comptabilité."],
+  etablissement: ["#1e6fd0", "ÉTAB", "Établissement géographique : clinique, centre SMR, HAD."],
+  pui: ["#0d47a1", "PUI", "Pharmacie à usage intérieur : autorisation, pharmacien gérant, établissements desservis."],
+  pole: ["#3949ab", "PÔLE", "Regroupement de services d'un établissement."],
+  service: ["#5c6bc0", "SERV", "Service d'un établissement : soins, médico-technique, logistique, administratif."],
+  uf: ["#7e57c2", "UF", "Unité fonctionnelle : maille de l'activité, des consommations et de l'analytique."],
+  magasin: ["#795548", "MAG", "Lieu de stock : réserve de pharmacie, coffre, armoire de service, économat."],
+  emplacement: ["#a1887f", "EMP", "Adresse de rangement à l'intérieur d'un magasin."],
+  referentiel: ["#546e7a", "RÉF", "Catalogue d'articles, partagé par plusieurs établissements ou propre à un seul."],
+  etablissement_referentiel: ["#607d8b", "UTIL", "Référentiel qu'un établissement utilise pour une nature d'articles."],
+  famille: ["#689f38", "FAM", "Famille d'articles, commune au groupe ou propre à un référentiel."],
+  article: ["#2e7d32", "ART", "Fiche produit : ce qu'est l'article, pour tous les établissements qui partagent son référentiel."],
+  article_site: ["#00897b", "SITE", "Un article référencé dans un établissement, avec ses réglages locaux."],
+  article_magasin: ["#00695c", "DOT", "Un article tenu dans un magasin : dotation et emplacement habituel."],
+  risque_service: ["#c62828", "RISQ", "Médicament à risque dans un service, en plus de la liste de la PUI."],
+  article_code_externe: ["#00838f", "CODE", "Code d'un article chez une centrale ou une autre source."],
+  fournisseur: ["#e65100", "FOUR", "Laboratoire, grossiste, fournisseur ou centrale d'achat."],
+  article_fournisseur: ["#b26a00", "PRIX", "Prix d'achat d'un article chez un fournisseur, pour le groupe ou un établissement."],
+  source_externe: ["#8e24aa", "SRC", "Centrale ou référentiel dont on importe les fiches produit."],
+  stock: ["#6a1b9a", "STK", "Quantité en stock d'un article par magasin, emplacement et lot (calculée par les mouvements)."],
+  mouvement: ["#ad1457", "MVT", "Entrée, sortie ou transfert de stock (enregistré, ne se modifie pas)."],
+  valorisation: ["#4527a0", "PUMP", "Prix unitaire moyen pondéré d'un article dans un établissement (calculé)."],
+  compteur: ["#616161", "CPT", "Numérotation automatique des codes d'un fichier."],
+};
+const teinte = (e) => (IDENTITE[e.nom] || ["#6b6862"])[0];
+const sigle = (e) => (IDENTITE[e.nom] || [null, e.libelle.slice(0, 3).toUpperCase()])[1];
+const description = (e) => (IDENTITE[e.nom] || [null, null, ""])[2];
+const pastille = (e, classe = "") => `<span class="pastille-fichier ${classe}" style="--teinte: ${teinte(e)}" title="${esc(e.libelle)}">${esc(sigle(e))}</span>`;
+
+/** Titre qui dit ce que l'on regarde, pour les fiches qui relient deux choses (null : l'étiquette suffit). */
+async function titreLisible(e, l) {
+  const nom = async (fichier, id) => (id ? decouper(await etiquette(fichier, id))[1] || "" : "");
+  const article = async () => (await nom("article", l.article_id)).replace(/ · [^·]+$/, "");
+  const choix = (fichier, col, v) => {
+    const o = etat.entites[fichier].champs.find((c) => c.col === col).extra.find(([k]) => k === v);
+    return o ? o[1] : v;
+  };
+  switch (e.nom) {
+    case "article_site": return { titre: `${await article()} — ${await nom("etablissement", l.etablissement_id)}` };
+    case "article_fournisseur": return {
+      titre: `${await article()} chez ${await nom("fournisseur", l.fournisseur_id)}`,
+      sous: [l.prix_unitaire_ht !== null ? `${nf.format(Number(l.prix_unitaire_ht))} € HT` : "", l.rang === 1 ? "fournisseur principal" : `rang ${l.rang}`,
+        l.etablissement_id ? `pour ${await nom("etablissement", l.etablissement_id)}` : "pour tout le groupe"].filter(Boolean).join(" · "),
+    };
+    case "article_magasin": return { titre: `${await article()} dans ${await nom("magasin", l.magasin_id)}` };
+    case "stock": return {
+      titre: `${await article()} dans ${await nom("magasin", l.magasin_id)}`,
+      sous: [`${nf.format(Number(l.quantite))} en stock`, l.lot ? `lot ${l.lot}` : "", l.peremption ? `péremption ${afficher({ genre: "date" }, l.peremption)}` : ""].filter(Boolean).join(" · "),
+    };
+    case "risque_service": return { titre: `${await article()} à risque en ${await nom("service", l.service_id)}` };
+    case "article_code_externe": return { titre: `${await article()} chez ${await nom("source_externe", l.source_id)} : ${l.code_externe}` };
+    case "etablissement_referentiel": return {
+      titre: `${await nom("etablissement", l.etablissement_id)} : ${choix("etablissement_referentiel", "nature", l.nature).toLowerCase()}`,
+      sous: `référentiel ${await nom("referentiel", l.referentiel_id)}`,
+    };
+    case "mouvement": return {
+      titre: `${choix("mouvement", "type", l.type)} : ${nf.format(Number(l.quantite))} × ${await article()}`,
+      sous: [afficher({ genre: "horodatage" }, l.le), l.utilisateur ? `par ${l.utilisateur}` : ""].filter(Boolean).join(" · "),
+    };
+    case "valorisation": return { titre: `PUMP de ${await article()} — ${await nom("etablissement", l.etablissement_id)}`,
+      sous: `${nf.format(Number(l.pump))} € par unité de stock` };
+    default: return null;
+  }
+}
 
 /** Valeur d'un champ, telle qu'on la lit : texte, lien (fiche liée) ou rien. */
 function valeurLecture(div) {
