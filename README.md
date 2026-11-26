@@ -22,7 +22,7 @@ Groupe de test complet (base vide, serveur lancé) : `python -I outils/groupe_te
 
 ## Contenu
 
-- `migrations/` : schéma PostgreSQL. Une migration appliquée ne se modifie plus : on en ajoute une nouvelle.
+- `migrations/` : schéma PostgreSQL. `001_schema.sql` contient le schéma complet ; les évolutions s'ajoutent en `002_…`, `003_…`. Une migration appliquée ne se modifie plus : on en ajoute une nouvelle.
 - `src/schema.rs` : description des fichiers de base. Elle fixe les tables et colonnes que l'API expose et sert à dessiner les pages.
 - `src/crud.rs` : API générique (`/api/e/{fichier}`) et historique (`/api/journal/{fichier}/{id}`).
 - `web/` : pages (thème clair uniquement).
