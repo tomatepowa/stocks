@@ -51,7 +51,10 @@ pub struct Etat {
 }
 
 /// Migrations, dans l'ordre ; une migration appliquée ne se modifie plus, on en ajoute une nouvelle.
-const MIGRATIONS: &[(&str, &str)] = &[("001_schema", include_str!("../migrations/001_schema.sql"))];
+const MIGRATIONS: &[(&str, &str)] = &[
+    ("001_schema", include_str!("../migrations/001_schema.sql")),
+    ("002_stupefiants_securises", include_str!("../migrations/002_stupefiants_securises.sql")),
+];
 
 async fn migrer(pool: &Pool) -> Result<()> {
     // La base peut démarrer après le serveur (docker compose) : on attend jusqu'à une minute.

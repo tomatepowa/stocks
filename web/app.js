@@ -210,7 +210,7 @@ async function demarrer() {
     return;
   }
   dessinerMenu();
-  document.body.classList.toggle("menu-replie", prefs.lire("menuReplie", false));
+  document.body.classList.toggle("menu-replie", prefs.lire("menuReplie", innerWidth < 1500));
   document.body.classList.toggle("nav-repliee", prefs.lire("navRepliee", false));
   $("#bascule-menu").addEventListener("click", () => {
     if (matchMedia("(max-width: 900px)").matches) { document.body.classList.toggle("menu-ouvert"); return; }
@@ -234,7 +234,7 @@ function dessinerMenu() {
     if (!groupes.has(e.groupe)) groupes.set(e.groupe, []);
     groupes.get(e.groupe).push(e);
   }
-  groupes.set("Outils", [{ nom: "import", pluriel: "Import de catalogues" }]);
+  groupes.set("Outils", [{ nom: "admin_pui", pluriel: "Administration de la PUI" }, { nom: "import", pluriel: "Import de catalogues" }]);
   const ouverts = prefs.lire("groupesOuverts", ["Structure", "Articles"]);
   let html = "";
   for (const [g, entites] of groupes) {
@@ -258,7 +258,9 @@ function marquerMenu(nom) {
 }
 
 function raccourcis(ev) {
-  if ((ev.ctrlKey || ev.metaKey) && ev.key === "s" && $("#formulaire")) { ev.preventDefault(); $("#formulaire").requestSubmit(); }
+  const form = $("#formulaire");
+  if ((ev.ctrlKey || ev.metaKey) && ev.key === "s" && form) { ev.preventDefault(); if (!form.classList.contains("lecture")) form.requestSubmit(); }
+  if (ev.key === "F2" && form && form.classList.contains("lecture")) { ev.preventDefault(); passerEnSaisie(); }
   if (ev.altKey && (ev.key === "ArrowDown" || ev.key === "ArrowUp") && etat.fiche) {
     ev.preventDefault();
     allerVoisin(ev.key === "ArrowDown" ? 1 : -1);
@@ -278,10 +280,10 @@ function router() {
   const [chemin, requete] = location.hash.slice(1).split("?");
   const [nom, id] = chemin.split("/");
   document.body.classList.toggle("mode-fiche", !!id && !!etat.entites[nom]);
-  if (nom === "import") {
+  if (nom === "import" || nom === "admin_pui") {
     marquerMenu(nom);
     etat.fiche = null;
-    pageImport();
+    (nom === "import" ? pageImport : pageAdminPui)();
     return;
   }
   const e = etat.entites[nom];
@@ -569,8 +571,8 @@ async function pageFiche(id, valeursInitiales = {}) {
     <div class="tete">
       <div class="fil" id="fil"><a href="#${e.nom}">${esc(e.pluriel)}</a></div>
       <div class="tete-ligne">
-        <div class="titre">${code ? `<div class="titre-code">${esc(code)}</div>` : ""}
-          <div class="titre-ligne"><h1>${esc(titre)}</h1><div class="badges" id="badges"></div></div></div>
+        <div class="titre"><span class="pastille-fichier" style="--teinte: ${teinte(e)}" title="${esc(e.libelle)}">${esc(initiales(e))}</span>
+          <div class="titre-ligne"><h1>${code ? `<span class="titre-code">${esc(code)}</span>` : ""}${esc(titre)}</h1><div class="badges" id="badges"></div></div></div>
         <div class="actions-tete">
         <span class="etat-saisie" id="etat-saisie" hidden>● Non enregistré</span>
         ${nouveau ? "" : `<div class="pagination">
@@ -580,7 +582,9 @@ async function pageFiche(id, valeursInitiales = {}) {
           <button type="button" class="discret icone" id="suivant" title="Fiche suivante (Alt+↓)">›</button></div>`}
         ${extra}
         ${etat.lectureSeule ? `<span class="compte">${e.mode === "lecture" ? "Calculé par la base" : "Mouvement enregistré : il ne se modifie pas"}</span>`
-          : `<button type="submit" form="formulaire" class="principal" title="Enregistrer (Ctrl+S)">Enregistrer</button>`}
+          : `${nouveau ? "" : `<button type="button" class="principal" id="modifier" title="Modifier la fiche (F2 ou double-clic sur un champ)">Modifier</button>
+             <button type="button" id="annuler" hidden>Annuler</button>`}
+             <button type="submit" form="formulaire" class="principal" id="enregistrer" title="Enregistrer (Ctrl+S)"${nouveau ? "" : " hidden"}>Enregistrer</button>`}
         ${nouveau || etat.lectureSeule ? "" : `<details class="plus-actions"><summary title="Autres actions">⋯</summary>
           <div class="menu-actions"><button type="button" class="danger" id="supprimer">Supprimer la fiche…</button></div></details>`}
         </div>
@@ -643,6 +647,14 @@ async function pageFiche(id, valeursInitiales = {}) {
   if (!nouveau && e.nom === "article") {
     $("#sources").addEventListener("click", () => ouvrirSources(null));
     await decorerChampsExternes();
+  }
+  if (!nouveau) {
+    passerEnLecture();
+    if (!etat.lectureSeule) {
+      $("#modifier").addEventListener("click", () => passerEnSaisie());
+      $("#annuler").addEventListener("click", () => { etat.modifie = false; pageFiche(ligne.id); });
+      form.addEventListener("dblclick", (ev) => { if (form.classList.contains("lecture")) passerEnSaisie(ev.target.closest(".champ")); });
+    }
   }
   if (nouveau) { const premier = $("input:not([type=checkbox]):not([type=hidden]), select", form); if (premier) premier.focus(); }
   else await chargerOnglets(ligne);
@@ -1376,6 +1388,168 @@ async function dessinerResumeStock() {
     : `<strong>Aucun stock</strong>`;
 }
 
+// ------------------------------------------------------------------ Fiche en lecture
+
+const TEINTES = { Structure: "#3b6ea5", Articles: "#2f7d4f", Achats: "#a8620b", Stock: "#7a4fa0", "Paramètres": "#6b6862" };
+const teinte = (e) => TEINTES[e.groupe] || "#6b6862";
+const initiales = (e) => e.libelle.split(/[\s-]+/).filter((m) => m.length > 2 || /^[A-Z]/.test(m)).slice(0, 2).map((m) => m[0].toUpperCase()).join("");
+
+/** Valeur d'un champ, telle qu'on la lit : texte, lien (fiche liée) ou rien. */
+function valeurLecture(div) {
+  const form = $("#formulaire");
+  const c = etat.courant.champs.find((x) => x.col === div.dataset.col);
+  if (!c || div.classList.contains("derive")) return null;
+  if (c.genre === "booleen") { const el = form.elements[c.col]; return el && el.checked ? "Oui" : ""; }
+  if (c.genre === "ref") {
+    const el = form.elements[c.col], texte = $(".combo-texte", div);
+    return el && el.value ? { lien: `#${c.extra}/${el.value}`, texte: texte ? texte.value : `#${el.value}` } : "";
+  }
+  if (c.genre === "choix") { const el = form.elements[c.col]; return el && el.value ? el.selectedOptions[0].text : ""; }
+  if (c.col === "code" || c.calcule || c.genre === "horodatage") { const el = $("input", div); return el ? el.value : ""; }
+  const el = form.elements[c.col];
+  if (!el || el.value === "") return "";
+  if (c.genre === "date") return afficher(c, el.value);
+  if (c.genre === "decimal" || c.genre === "entier") return nf.format(Number(el.value));
+  return el.value;
+}
+
+/** Lecture : chaque champ en « libellé : valeur », les champs et les cartes vides masqués. */
+function dessinerLecture() {
+  const form = $("#formulaire");
+  for (const div of $$(".champ", form)) {
+    const v = valeurLecture(div);
+    if (v === null) continue;
+    let zone = $(".valeur-lecture", div);
+    if (!zone) { div.insertAdjacentHTML("beforeend", `<div class="valeur-lecture"></div>`); zone = $(".valeur-lecture", div); }
+    zone.innerHTML = typeof v === "object" ? `<a href="${v.lien}">${esc(v.texte)}</a>` : esc(v);
+    div.classList.toggle("vide", !v);
+  }
+  for (const carte of $$(".carte", form)) {
+    carte.classList.toggle("vide-lecture", $$(".champ", carte).every((d) => d.hidden || d.classList.contains("vide")));
+  }
+}
+
+function passerEnLecture() {
+  const form = $("#formulaire");
+  if (!form) return;
+  dessinerLecture();
+  form.classList.add("lecture");
+  for (const [id, visible] of [["#modifier", true], ["#annuler", false], ["#enregistrer", false]]) { const b = $(id); if (b) b.hidden = !visible; }
+}
+
+function passerEnSaisie(champ = null) {
+  const form = $("#formulaire");
+  if (!form || etat.lectureSeule || !form.classList.contains("lecture")) return;
+  form.classList.remove("lecture");
+  for (const [id, visible] of [["#modifier", false], ["#annuler", true], ["#enregistrer", true]]) { const b = $(id); if (b) b.hidden = !visible; }
+  const el = champ && ($(".combo-texte", champ) || $("input:not([type=hidden]):not([readonly]), select, textarea", champ));
+  if (el) el.focus();
+}
+
+// ------------------------------------------------------------------ Structure d'un établissement
+
+/** Onglet « Structure » : pôles, services et UF en arbre ; magasins avec leur chaîne d'approvisionnement. */
+async function afficherStructure(vue) {
+  const id = etat.fiche.id;
+  const [poles, services, ufs, magasins] = await Promise.all(["pole", "service", "uf", "magasin"]
+    .map((n) => api(`/api/e/${n}?etablissement_id=${id}&limit=2000`)));
+  const libelleChoix = (entite, col, v) => {
+    const c = etat.entites[entite].champs.find((x) => x.col === col);
+    const o = c && c.extra.find(([k]) => k === v);
+    return o ? o[1] : v;
+  };
+  const lien = (nom, l, suite = "") => `<a href="#${nom}/${l.id}"><span class="code">${esc(l.code)}</span> ${esc(l.libelle)}</a>${suite}`;
+  const ufHtml = (s) => ufs.filter((u) => u.service_id === s.id).map((u) => `<li>${lien("uf", u,
+    ` <span class="badge">${esc(u.activite)}</span>${u.centre_cout ? ` <span class="discret">${esc(u.centre_cout)}</span>` : ""}`)}</li>`).join("");
+  const servicesHtml = (liste) => liste.map((s) => `<li>${lien("service", s, ` <span class="discret">${esc(libelleChoix("service", "type", s.type))}</span>`)}
+    ${ufHtml(s) ? `<ul>${ufHtml(s)}</ul>` : ""}</li>`).join("");
+  let soins = poles.map((p) => `<li class="pole">${lien("pole", p)}<ul>${servicesHtml(services.filter((s) => s.pole_id === p.id))}</ul></li>`).join("");
+  const sansPole = services.filter((s) => !s.pole_id);
+  if (sansPole.length) soins += poles.length ? `<li class="pole"><span class="discret">Hors pôle</span><ul>${servicesHtml(sansPole)}</ul></li>` : servicesHtml(sansPole);
+
+  const ici = new Set(magasins.map((m) => m.id));
+  const enfants = (m) => magasins.filter((x) => x.magasin_source_id === m.id);
+  const magasinHtml = (m) => `<li>${lien("magasin", m, ` <span class="badge">${esc(libelleChoix("magasin", "role", m.role))}</span>`
+    + (m.securise_stupefiants ? ` <span class="badge alerte">Sécurisé stupéfiants</span>` : "")
+    + (m.magasin_source_id && !ici.has(m.magasin_source_id) ? ` <span class="discret">approvisionné par ${esc(m._l_magasin_source_id)}</span>` : ""))}
+    ${enfants(m).length ? `<ul>${enfants(m).map(magasinHtml).join("")}</ul>` : ""}</li>`;
+  const racines = magasins.filter((m) => !m.magasin_source_id || !ici.has(m.magasin_source_id));
+  vue.innerHTML = `<p class="compte">${poles.length} pôle${poles.length > 1 ? "s" : ""} · ${services.length} services · ${ufs.length} UF · ${magasins.length} magasins</p>
+    <div class="structure">
+      <section><h3>Organisation des soins</h3><ul class="arbre">${soins || `<li class="vide">Aucun service.</li>`}</ul></section>
+      <section><h3>Magasins et approvisionnement</h3><ul class="arbre">${racines.map(magasinHtml).join("") || `<li class="vide">Aucun magasin.</li>`}</ul></section>
+    </div>`;
+}
+
+// ------------------------------------------------------------------ Administration de la PUI
+
+/** Réglages du pharmacien gérant : contrôle des stupéfiants, magasins sécurisés, écarts à régulariser. */
+async function pageAdminPui() {
+  const puis = await api("/api/e/pui");
+  if (!puis.length) { $("#page").innerHTML = `<h1>Administration de la PUI</h1><p class="vide">Aucune PUI.</p>`; return; }
+  const pui = puis.find((p) => String(p.id) === String(etat.adminPui)) || puis[0];
+  etat.adminPui = pui.id;
+  const magasins = await api(`/api/e/magasin?pui_id=${pui.id}&limit=2000`);
+  const ici = new Set(magasins.map((m) => m.id));
+  const hors = (await api("/api/e/mouvement?hors_regle=true&limit=1000"))
+    .filter((m) => ici.has(m.magasin_source_id) || ici.has(m.magasin_destination_id));
+  const champ = (col) => etat.entites.pui.champs.find((c) => c.col === col);
+  const role = (v) => (etat.entites.magasin.champs.find((c) => c.col === "role").extra.find(([k]) => k === v) || [v, v])[1];
+  $("#page").innerHTML = `
+    <div class="tete-liste"><h1>Administration de la PUI</h1>
+      <select id="admin-pui">${puis.map((p) => `<option value="${p.id}" ${p.id === pui.id ? "selected" : ""}>${esc(p._etiquette)}</option>`).join("")}</select>
+      <span class="compte">Réglages du pharmacien gérant${pui.pharmacien_gerant ? ` : ${esc(pui.pharmacien_gerant)}` : ""}</span></div>
+    <p class="texte-aide">Ces réglages s'appliquent à tous les établissements desservis par la PUI. La page n'est pas encore réservée
+      au pharmacien gérant : elle le sera avec la connexion des utilisateurs.</p>
+    <div class="admin-grille">
+      <section class="panneau-admin"><h3>Contrôle des stupéfiants</h3>
+        ${champ("controle_stupefiants").extra.map(([k, l]) => `<label class="choix-carte${pui.controle_stupefiants === k ? " actif" : ""}">
+          <input type="radio" name="controle" value="${k}" ${pui.controle_stupefiants === k ? "checked" : ""}>
+          <span><strong>${k === "strict" ? "Strict" : "Souple"}</strong><br>${esc(l.split(" : ")[1] || l)}</span></label>`).join("")}
+        <p class="texte-aide">En souple, un stupéfiant peut aller dans un magasin non sécurisé ou sortir sans séjour, à condition
+          d'indiquer un motif : le mouvement est marqué « hors règle » et listé ci-dessous.</p></section>
+      <section class="panneau-admin"><h3>PUI</h3>
+        <div class="champ"><label>Pharmacien gérant</label><input type="text" id="admin-gerant" value="${esc(pui.pharmacien_gerant || "")}"></div>
+        <div class="champ"><label>Cadre</label><select id="admin-cadre">${champ("cadre").extra.map(([k, l]) => `<option value="${k}" ${pui.cadre === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
+        <div class="actions"><button type="button" class="principal" id="admin-enregistrer">Enregistrer</button>
+          <a class="bouton" href="#pui/${pui.id}">Fiche complète</a><span id="admin-message"></span></div></section>
+    </div>
+    <h2 class="sous-titre-page">Magasins de la PUI <span class="compte">${magasins.length}</span></h2>
+    <p class="texte-aide">Cochez les lieux fermés à clé où les stupéfiants peuvent être stockés. Un coffre l'est toujours.</p>
+    <div class="tableau"><table><thead><tr><th>Établissement</th><th>Magasin</th><th>Rôle</th><th>Sécurisé pour les stupéfiants</th></tr></thead><tbody>
+      ${magasins.map((m) => `<tr><td>${esc(m._l_etablissement_id)}</td><td><a href="#magasin/${m.id}">${esc(m._etiquette)}</a></td><td>${esc(role(m.role))}</td>
+        <td><label class="interrupteur"><input type="checkbox" data-securise="${m.id}" ${m.securise_stupefiants ? "checked" : ""} ${m.role === "coffre_stupefiants" ? "disabled" : ""}>
+        <span>${m.securise_stupefiants ? "Oui" : "Non"}</span></label></td></tr>`).join("")}
+    </tbody></table></div>
+    <h2 class="sous-titre-page">Mouvements hors règle à régulariser <span class="compte">${hors.length}</span></h2>
+    <div id="admin-hors">${hors.length ? await tableau(etat.entites.mouvement, hors, null) : `<p class="vide">Aucun écart.</p>`}</div>`;
+  lierLignes($("#admin-hors"), "mouvement");
+  $("#admin-pui").addEventListener("change", (ev) => { etat.adminPui = ev.target.value; pageAdminPui(); });
+  const enregistrer = async (corps, ok) => {
+    try {
+      await api(`/api/e/pui/${pui.id}`, { method: "PUT", body: JSON.stringify(corps) });
+      oublierEtiquettes("pui");
+      $("#admin-message").innerHTML = `<span class="message ok">${esc(ok)}</span>`;
+    } catch (err) { $("#admin-message").innerHTML = `<span class="message erreur">${esc(err.message)}</span>`; }
+  };
+  for (const r of $$("[name=controle]")) {
+    r.addEventListener("change", async () => {
+      for (const l of $$(".choix-carte")) l.classList.toggle("actif", $("input", l).checked);
+      await enregistrer({ controle_stupefiants: r.value }, `Contrôle des stupéfiants : ${r.value}.`);
+    });
+  }
+  $("#admin-enregistrer").addEventListener("click", () => enregistrer(
+    { pharmacien_gerant: $("#admin-gerant").value, cadre: $("#admin-cadre").value }, "PUI enregistrée."));
+  for (const c of $$("[data-securise]")) {
+    c.addEventListener("change", async () => {
+      try {
+        await api(`/api/e/magasin/${c.dataset.securise}`, { method: "PUT", body: JSON.stringify({ securise_stupefiants: c.checked }) });
+        c.nextElementSibling.textContent = c.checked ? "Oui" : "Non";
+      } catch (err) { c.checked = !c.checked; alert(err.message); }
+    });
+  }
+}
+
 // ------------------------------------------------------------------ Impacts d'une modification en cours
 
 const IMPACTS_DETAILLES = 3;  // au-delà, on affiche le nombre (cliquable) plutôt que chaque fiche
@@ -1432,10 +1606,20 @@ async function chargerOnglets(ligne) {
   }
   const onglets = $("#onglets");
   if (!onglets || etat.fiche !== ligne) return;
+  // Petit écran : les six premiers onglets non vides restent visibles, les autres vont dans « Plus ».
+  const bouton = (b) => `<button type="button" data-onglet="${b.cle}">${esc(b.titre)} <span class="nombre">${nf.format(b.total)}</span></button>`;
+  const pleins = etat.blocs.filter((b) => b.total > 0);
+  const visibles = pleins.slice(0, 6);
+  const autres = etat.blocs.filter((b) => !visibles.includes(b));
   onglets.innerHTML = `<button type="button" data-onglet="fiche">Fiche</button>`
-    + etat.blocs.map((b) => `<button type="button" data-onglet="${b.cle}">${esc(b.titre)} <span class="nombre">${nf.format(b.total)}</span></button>`).join("")
-    + `<button type="button" data-onglet="historique">Historique</button>`;
-  for (const b of $$("button", onglets)) b.addEventListener("click", () => afficherOnglet(b.dataset.onglet));
+    + (e.nom === "etablissement" ? `<button type="button" data-onglet="structure">Structure</button>` : "")
+    + visibles.map(bouton).join("")
+    + `<button type="button" data-onglet="historique">Historique</button>`
+    + (autres.length ? `<details class="plus-actions plus-onglets"><summary>Plus <span class="nombre">${autres.length}</span> ▾</summary>
+        <div class="menu-actions">${autres.map(bouton).join("")}</div></details>` : "");
+  for (const b of $$("button", onglets)) {
+    b.addEventListener("click", () => { const d = b.closest("details"); if (d) d.open = false; afficherOnglet(b.dataset.onglet); });
+  }
   afficherImpacts();
   const voulu = (etat.onglet || {})[e.nom];
   afficherOnglet(voulu && $(`[data-onglet="${voulu}"]`, onglets) ? voulu : "fiche");
@@ -1445,6 +1629,9 @@ async function afficherOnglet(cle) {
   const e = etat.courant, ligne = etat.fiche;
   (etat.onglet ??= {})[e.nom] = cle;
   for (const b of $$("#onglets button")) b.classList.toggle("actif", b.dataset.onglet === cle);
+  const plus = $("#onglets .plus-onglets summary");
+  if (plus) plus.classList.toggle("actif", !!$(`.plus-onglets [data-onglet="${cle}"]`));
+  const jeton = (etat.jetonOnglet = (etat.jetonOnglet || 0) + 1);
   const vue = $("#vue-onglet");
   $("#formulaire").hidden = cle !== "fiche";
   for (const id of ["#impacts", "#prix-connus"]) { const z = $(id); if (z && cle !== "fiche") z.hidden = true; }
@@ -1452,6 +1639,13 @@ async function afficherOnglet(cle) {
   vue.hidden = cle === "fiche";
   if (cle === "fiche") return;
   if (cle === "historique") { await historique(vue); return; }
+  if (cle === "structure") {
+    // Le dernier onglet demandé gagne (deux demandes peuvent se croiser pendant le chargement).
+    const tampon = document.createElement("div");
+    await afficherStructure(tampon);
+    if (jeton === etat.jetonOnglet) vue.innerHTML = tampon.innerHTML;
+    return;
+  }
   const b = etat.blocs.find((x) => x.cle === cle);
   if (!b) return;
   vue.innerHTML = `<div class="onglet-lie">

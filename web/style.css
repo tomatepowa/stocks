@@ -406,3 +406,91 @@ td.exemples { color: var(--fg-doux); white-space: normal; font-size: 12px; }
   .sections { columns: 1; }
   .tete-liste input[type=search] { width: 100%; }
 }
+
+/* ================================================================== Fiche en lecture, en-tête compact,
+   structure, administration (petit écran : la densité d'abord). */
+
+.pastille-fichier {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 34px; height: 34px; border-radius: 9px; font-weight: 700; font-size: 13px; color: #fff;
+  background: var(--teinte); box-shadow: 0 1px 3px rgba(31, 30, 28, .18);
+}
+.titre { display: flex; align-items: center; gap: 10px; }
+.titre-ligne h1 { font-size: 18px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.titre-ligne .titre-code { font-size: 12px; }
+.tete { padding-top: 6px; }
+.tete-ligne { align-items: center; }
+.onglets { margin-top: 4px; }
+.onglets button { height: 30px; padding: 0 10px; }
+.plus-onglets summary { width: auto; height: 30px; padding: 0 10px; border: 0; color: var(--fg-doux); font-size: 14px; border-radius: 0;
+  border-bottom: 2px solid transparent; }
+.plus-onglets summary.actif { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.plus-onglets .menu-actions { right: auto; left: 0; min-width: 260px; }
+.plus-onglets .menu-actions button { height: 30px; border-bottom: 0; }
+
+/* Cartes plus douces : titres en clair, sans majuscules. */
+.carte { border-radius: 12px; border-color: #e6e1d8; padding: 6px 16px 8px; }
+.carte legend { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--fg); font-weight: 650;
+  background: transparent; padding: 0 6px; }
+.carte.filiation legend { color: var(--fg-doux); }
+
+/* Lecture : « libellé : valeur » sur une ligne, champs et cartes vides masqués. */
+.sections.lecture .carte.vide-lecture { display: none; }
+.sections.lecture .champ { display: grid; grid-template-columns: minmax(110px, 40%) minmax(0, 1fr); gap: 10px;
+  align-items: baseline; margin: 0; padding: 5px 0; border-bottom: 1px dotted #ece8e0; }
+.sections.lecture .champ:last-child { border-bottom: 0; }
+.sections.lecture .champ.vide { display: none; }
+.sections.lecture .champ label { margin: 0; font-size: 12.5px; }
+.sections.lecture .champ > input, .sections.lecture .champ > select, .sections.lecture .champ > textarea,
+.sections.lecture .champ > .combo, .sections.lecture .champ.case input, .sections.lecture .info,
+.sections.lecture .provenance, .sections.lecture .requis { display: none; }
+.sections.lecture .champ.case label { color: var(--fg-doux); font-size: 12.5px; }
+.valeur-lecture { display: none; }
+.sections.lecture .valeur-lecture { display: block; font-weight: 500; color: var(--fg); overflow-wrap: anywhere; }
+.sections.lecture .valeur-lecture a { color: var(--accent); text-decoration: none; }
+.sections.lecture .valeur-lecture a:hover { text-decoration: underline; }
+.sections.lecture .champ.derive .valeur-derivee { background: transparent; padding: 0; min-height: 0; }
+.sections.lecture button.prendre { justify-self: start; }
+.sections.lecture .champ[data-col="code"] .valeur-lecture { font: 600 13px var(--mono); color: var(--fg-doux); }
+
+/* Structure d'un établissement. */
+.structure { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; margin-top: 6px; }
+.structure section { background: var(--fond); border: 1px solid #e6e1d8; border-radius: 12px; padding: 8px 14px 10px; }
+.structure h3 { font-size: 14px; margin: 4px 0 8px; }
+.arbre, .arbre ul { list-style: none; margin: 0; padding: 0; }
+.arbre ul { margin-left: 14px; padding-left: 12px; border-left: 1px solid var(--trait); }
+.arbre li { padding: 3px 0; }
+.arbre li.pole > a, .arbre li.pole > .discret { font-weight: 650; }
+.arbre a { color: var(--fg); text-decoration: none; }
+.arbre a:hover { color: var(--accent); }
+.arbre .code { font: 600 11px var(--mono); color: var(--fg-doux); }
+.arbre .badge { font-size: 11px; padding: 1px 6px; }
+.discret { color: var(--fg-pale); font-size: 12px; }
+
+/* Administration de la PUI. */
+.admin-grille { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.panneau-admin { background: var(--fond); border: 1px solid #e6e1d8; border-radius: 12px; padding: 10px 16px 14px; }
+.panneau-admin h3 { font-size: 15px; margin: 4px 0 10px; }
+.choix-carte { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; margin-bottom: 8px; cursor: pointer;
+  border: 1px solid var(--trait); border-radius: 10px; font-size: 13px; color: var(--fg-doux); }
+.choix-carte strong { color: var(--fg); font-size: 14px; }
+.choix-carte.actif { border-color: var(--accent); background: var(--accent-fond); }
+.choix-carte input { margin-top: 3px; accent-color: var(--accent); }
+.interrupteur { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.interrupteur input { accent-color: var(--accent); width: 16px; height: 16px; }
+
+/* Petit écran (hauteur réduite) : en-tête et espaces resserrés. */
+@media (max-height: 700px) {
+  :root { --barre-h: 38px; }
+  .barre strong { font-size: 14px; }
+  #page { padding-top: 10px; }
+  .tete { margin-top: -10px; }
+  .pastille-fichier { width: 28px; height: 28px; font-size: 12px; border-radius: 8px; }
+  .titre-ligne h1 { font-size: 17px; }
+  .puces { margin-top: 3px; }
+  .resume-stock { margin-top: 3px; }
+  .carte { margin-bottom: 12px; }
+  .sections { column-gap: 12px; }
+}
+@media (max-width: 1400px) { :root { --nav-l: 240px; --menu-l: 190px; } }
+.tete-liste select { width: auto; max-width: 100%; }
